@@ -95,12 +95,13 @@ import Ctl.Internal.Cardano.Types.Transaction
   )
 import Ctl.Internal.Cardano.Types.Value
   ( Coin(Coin)
-  , Value
+  , Value(Value)
   , coinToValue
   , equipartitionValueWithTokenQuantityUpperBound
   , getNonAdaAsset
   , minus
   , mkValue
+  , posNonAdaAsset
   , valueToCoin'
   )
 import Ctl.Internal.QueryM (QueryM, getProtocolParameters)
@@ -123,7 +124,7 @@ import Data.Either (Either, note)
 import Data.Foldable (fold, foldMap, foldr, sum)
 import Data.Lens.Getter ((^.))
 import Data.Lens.Setter ((%~), (.~), (?~))
-import Data.Map (empty, lookup, union) as Map
+import Data.Map (empty, filterKeys, lookup, union) as Map
 import Data.Maybe (Maybe(Nothing, Just), fromMaybe, isJust, maybe)
 import Data.Newtype (unwrap, wrap)
 import Data.Set (Set)
@@ -203,11 +204,19 @@ balanceTxWithConstraints unbalancedTx constraintsBuilder = do
 -- Balancing Algorithm
 --------------------------------------------------------------------------------
 
-type BalanceTxState =
+type BalancerState =
   { unbalancedTx :: UnattachedUnbalancedTx
   , changeOutputs :: Array TransactionOutput
   , leftoverUtxos :: UtxoMap
   }
+
+mkBalancerState
+  :: UnattachedUnbalancedTx
+  -> Array TransactionOutput
+  -> UtxoMap
+  -> BalancerState
+mkBalancerState unbalancedTx changeOutputs leftoverUtxos =
+  { unbalancedTx, changeOutputs, leftoverUtxos }
 
 runBalancer
   :: UtxoMap
@@ -216,13 +225,18 @@ runBalancer
   -> Coin
   -> UnattachedUnbalancedTx
   -> BalanceTxM FinalizedTransaction
-runBalancer allUtxos utxos changeAddress certsFee =
-  ( prebalanceTx
-      <<< { unbalancedTx: _, changeOutputs: mempty, leftoverUtxos: utxos }
-  )
-    <=< addLovelacesToTransactionOutputs
+runBalancer allUtxos utxos changeAddress certsFee unbalancedTx' = do
+  spendableUtxos <- getSpendableUtxos
+  addLovelacesToTransactionOutputs unbalancedTx'
+    >>= ((\tx -> mkBalancerState tx mempty spendableUtxos) >>> prebalanceTx)
   where
-  prebalanceTx :: BalanceTxState -> BalanceTxM FinalizedTransaction
+  getSpendableUtxos :: BalanceTxM UtxoMap
+  getSpendableUtxos =
+    asksConstraints Constraints._nonSpendableInputs <#>
+      \nonSpendableInputs ->
+        Map.filterKeys (not <<< flip Set.member nonSpendableInputs) utxos
+
+  prebalanceTx :: BalancerState -> BalanceTxM FinalizedTransaction
   prebalanceTx { unbalancedTx, changeOutputs, leftoverUtxos } = do
     selectionState <-
       performCoinSelection
@@ -246,12 +260,9 @@ runBalancer allUtxos utxos changeAddress certsFee =
         (setTxChangeOutputs changeOutputs' unbalancedTxWithInputs ^. _body')
 
     let
-      updatedState :: BalanceTxState
+      updatedState :: BalancerState
       updatedState =
-        { unbalancedTx: unbalancedTxWithInputs
-        , changeOutputs: changeOutputs'
-        , leftoverUtxos: leftoverUtxos'
-        }
+        mkBalancerState unbalancedTxWithInputs changeOutputs' leftoverUtxos'
 
     case requiredValue == mempty of
       true ->
@@ -264,7 +275,7 @@ runBalancer allUtxos utxos changeAddress certsFee =
       except (getRequiredValue certsFee utxos txBody)
         >>= performMultiAssetSelection SelectionStrategyOptimal leftoverUtxos
 
-  balanceChangeAndMinFee :: BalanceTxState -> BalanceTxM FinalizedTransaction
+  balanceChangeAndMinFee :: BalancerState -> BalanceTxM FinalizedTransaction
   balanceChangeAndMinFee state@{ unbalancedTx, changeOutputs } = do
     let
       prebalancedTx :: PrebalancedTransaction
@@ -290,7 +301,7 @@ runBalancer allUtxos utxos changeAddress certsFee =
             (setTxChangeOutputs changeOutputs' unbalancedTxWithMinFee ^. _body')
 
         let
-          updatedState :: BalanceTxState
+          updatedState :: BalancerState
           updatedState = state
             { unbalancedTx = unbalancedTxWithMinFee
             , changeOutputs = changeOutputs'
@@ -316,8 +327,12 @@ runBalancer allUtxos utxos changeAddress certsFee =
   genTransactionChangeOutputs certsFee txBody = do
     inputValue <- except $ getInputValue utxos txBody
     let
+      posValue :: Value -> Value
+      posValue (Value (Coin coin) nonAdaAsset) =
+        mkValue (Coin $ max coin zero) (posNonAdaAsset nonAdaAsset)
+
       changeValue :: Value
-      changeValue =
+      changeValue = posValue $
         (inputValue <> mintValue txBody) `minus`
           (outputValue txBody <> minFeeValue txBody <> coinToValue certsFee)
 
