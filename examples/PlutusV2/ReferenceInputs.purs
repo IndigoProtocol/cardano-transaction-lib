@@ -35,7 +35,6 @@ import Contract.Scripts
   , mintingPolicyHash
   , validatorHash
   )
-import Contract.Test.E2E (publishTestFeedback)
 import Contract.TextEnvelope
   ( TextEnvelopeType(PlutusScriptV2)
   , textEnvelopeBytes
@@ -73,13 +72,12 @@ main = example testnetNamiConfig
 example :: ConfigParams () -> Effect Unit
 example cfg = launchAff_ do
   runContract cfg contract
-  publishTestFeedback true
 
 contract :: Contract () Unit
 contract = do
   logInfo' "Running Examples.PlutusV2.ReferenceInputs"
   validator <- alwaysSucceedsScriptV2
-  mintsScript <- alwaysMintsPolicyV2
+  mintsScript <- alwaysMintsPolicyScriptV2
   tokenName <- Helpers.mkTokenName "TheToken"
   let
     vhash :: ValidatorHash
@@ -195,7 +193,10 @@ mustPayToPubKeyStakeAddressWithScriptRef pkh (Just skh) =
 
 foreign import alwaysMintsV2 :: String
 
-alwaysMintsPolicyV2 :: Contract () PlutusScript
-alwaysMintsPolicyV2 =
-  map plutusV2Script
-    (textEnvelopeBytes alwaysMintsV2 PlutusScriptV2)
+alwaysMintsPolicyV2 :: Contract () MintingPolicy
+alwaysMintsPolicyV2 = PlutusMintingPolicy <$> alwaysMintsPolicyScriptV2
+
+alwaysMintsPolicyScriptV2 :: Contract () PlutusScript
+alwaysMintsPolicyScriptV2 =
+  plutusV2Script <$> textEnvelopeBytes alwaysMintsV2 PlutusScriptV2
+
