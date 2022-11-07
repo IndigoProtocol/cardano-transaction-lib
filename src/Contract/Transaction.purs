@@ -27,8 +27,8 @@ module Contract.Transaction
   , module ScriptLookups
   , module ScriptRef
   , module Transaction
-  , module TransactionMetadata
   , module UnbalancedTx
+  , module X
   , reindexSpentScriptRedeemers
   , signTransaction
   , submit
@@ -97,6 +97,7 @@ import Ctl.Internal.Cardano.Types.Transaction
   , GenesisHash(GenesisHash)
   , Mint(Mint)
   , Nonce(IdentityNonce, HashNonce)
+  , PoolPubKeyHash(PoolPubKeyHash)
   , ProposedProtocolParameterUpdates(ProposedProtocolParameterUpdates)
   , ProtocolParamUpdate
   , ProtocolVersion
@@ -155,6 +156,8 @@ import Ctl.Internal.Plutus.Types.Transaction
 import Ctl.Internal.Plutus.Types.Transaction (UtxoMap)
 import Ctl.Internal.Plutus.Types.TransactionUnspentOutput
   ( TransactionUnspentOutput(TransactionUnspentOutput)
+  , _input
+  , _output
   , lookupTxHash
   , mkTxUnspentOut
   ) as PTransactionUnspentOutput
@@ -189,6 +192,13 @@ import Ctl.Internal.Types.OutputDatum
   , outputDatumDataHash
   , outputDatumDatum
   ) as OutputDatum
+import Ctl.Internal.Types.RewardAddress
+  ( RewardAddress
+  , rewardAddressFromBech32
+  , rewardAddressFromBytes
+  , rewardAddressToBech32
+  , rewardAddressToBytes
+  ) as X
 import Ctl.Internal.Types.ScriptLookups
   ( MkUnbalancedTxError
       ( TypeCheckFailed
@@ -232,11 +242,6 @@ import Ctl.Internal.Types.Transaction
   ( TransactionHash
   , TransactionInput(TransactionInput)
   )
-import Ctl.Internal.Types.TransactionMetadata
-  ( GeneralTransactionMetadata(GeneralTransactionMetadata)
-  , TransactionMetadatum(MetadataMap, MetadataList, Int, Bytes, Text)
-  , TransactionMetadatumLabel(TransactionMetadatumLabel)
-  ) as TransactionMetadata
 import Ctl.Internal.Types.UnbalancedTransaction
   ( UnbalancedTx(UnbalancedTx)
   , _transaction
@@ -248,6 +253,11 @@ import Ctl.Internal.Types.UsedTxOuts
   , lockTransactionInputs
   , unlockTransactionInputs
   )
+import Ctl.Internal.Types.VRFKeyHash
+  ( VRFKeyHash
+  , vrfKeyHashFromBytes
+  , vrfKeyHashToBytes
+  ) as X
 import Data.Array.NonEmpty as NonEmptyArray
 import Data.BigInt (BigInt)
 import Data.Either (Either(Left, Right), hush)
@@ -283,7 +293,7 @@ signTransaction =
     <<< unwrap
 
 -- | Submits a `BalancedSignedTransaction`, which is the output of
--- | `signTransaction` or `balanceAndSignTx`
+-- | `signTransaction`.
 submit
   :: forall (r :: Row Type)
    . BalancedSignedTransaction

@@ -10,6 +10,7 @@ import Control.Monad.Error.Class (liftMaybe)
 import Control.Monad.Except.Trans (ExceptT(ExceptT), except, runExceptT)
 import Control.Monad.Logger.Class (class MonadLogger)
 import Control.Monad.Logger.Class as Logger
+import Control.Monad.Reader (asks)
 import Ctl.Internal.BalanceTx.Collateral
   ( addTxCollateral
   , addTxCollateralReturn
@@ -74,20 +75,24 @@ import Ctl.Internal.BalanceTx.Types
 import Ctl.Internal.BalanceTx.Types (FinalizedTransaction(FinalizedTransaction)) as FinalizedTransaction
 import Ctl.Internal.BalanceTx.UtxoMinAda (utxoMinAdaValue)
 import Ctl.Internal.Cardano.Types.Transaction
-  ( Transaction(Transaction)
+  ( Certificate(StakeRegistration, StakeDeregistration)
+  , Transaction(Transaction)
   , TransactionOutput(TransactionOutput)
   , TxBody(TxBody)
   , UtxoMap
   , _body
+  , _certs
   , _fee
   , _inputs
   , _mint
   , _networkId
   , _outputs
+  , _withdrawals
   )
 import Ctl.Internal.Cardano.Types.Value
   ( Coin(Coin)
   , Value
+  , coinToValue
   , equipartitionValueWithTokenQuantityUpperBound
   , geq
   , getNonAdaAsset
@@ -117,11 +122,11 @@ import Data.Array.NonEmpty (NonEmptyArray)
 import Data.Array.NonEmpty (toArray) as NEArray
 import Data.BigInt (BigInt)
 import Data.Either (Either(Left, Right), hush, note)
-import Data.Foldable (foldMap, foldl, foldr)
+import Data.Foldable (fold, foldMap, foldl, foldr, sum)
 import Data.Lens.Getter ((^.))
 import Data.Lens.Setter ((%~), (.~), (?~))
 import Data.Log.Tag (tag)
-import Data.Map (empty, filterKeys, lookup, toUnfoldable, union) as Map
+import Data.Map (empty, filterKeys, lookup, toUnfoldable, union, unionWith) as Map
 import Data.Maybe (Maybe(Nothing, Just), isJust, maybe)
 import Data.Newtype (unwrap, wrap)
 import Data.Set (Set)
@@ -130,19 +135,25 @@ import Data.Traversable (traverse, traverse_)
 import Data.Tuple.Nested (type (/\), (/\))
 import Effect.Class (class MonadEffect, liftEffect)
 
--- | Balances an unbalanced transaction using the specified balancer 
+-- | Balances an unbalanced transaction using the specified balancer
 -- | constraints.
 balanceTxWithConstraints
   :: UnattachedUnbalancedTx
   -> BalanceTxConstraintsBuilder
   -> QueryM (Either BalanceTxError FinalizedTransaction)
-balanceTxWithConstraints unbalancedTx constraintsBuilder =
+balanceTxWithConstraints unbalancedTx constraintsBuilder = do
+  pparams <- asks $ _.runtime >>> _.pparams
+
   withBalanceTxConstraints constraintsBuilder $ runExceptT do
     let
       getWalletAddresses :: BalanceTxM (Array Address)
       getWalletAddresses =
         liftEitherQueryM $
           QueryM.getWalletAddresses <#> note CouldNotGetWalletAddresses
+
+      depositValuePerCert = (unwrap pparams).stakeAddressDeposit
+      certsFee = getStakingBalance (unbalancedTx ^. _transaction')
+        depositValuePerCert
 
     ownAddrs <-
       maybe getWalletAddresses pure
@@ -174,7 +185,7 @@ balanceTxWithConstraints unbalancedTx constraintsBuilder =
     logTx "unbalancedCollTx" availableUtxos unbalancedCollTx
 
     -- Balance and finalize the transaction:
-    runBalancer allUtxos availableUtxos changeAddr
+    runBalancer allUtxos availableUtxos changeAddr certsFee
       (unbalancedTx # _transaction' .~ unbalancedCollTx)
   where
   unbalancedTxWithNetworkId :: BalanceTxM Transaction
@@ -206,9 +217,10 @@ runBalancer
   :: UtxoMap
   -> UtxoMap
   -> ChangeAddress
+  -> Coin
   -> UnattachedUnbalancedTx
   -> BalanceTxM FinalizedTransaction
-runBalancer allUtxos utxos changeAddress =
+runBalancer allUtxos utxos changeAddress certsFee =
   mainLoop one zero <=< addLovelacesToTransactionOutputs
   where
   mainLoop
@@ -222,13 +234,14 @@ runBalancer allUtxos utxos changeAddress =
         setTransactionMinFee minFee unbalancedTx
 
     unbalancedTxWithInputs <-
-      addTransactionInputs changeAddress utxos unbalancedTxWithMinFee
+      addTransactionInputs changeAddress utxos certsFee unbalancedTxWithMinFee
 
     traceMainLoop "added transaction inputs" "unbalancedTxWithInputs"
       unbalancedTxWithInputs
 
     prebalancedTx <-
-      addTransactionChangeOutputs changeAddress utxos unbalancedTxWithInputs
+      addTransactionChangeOutputs changeAddress utxos certsFee
+        unbalancedTxWithInputs
 
     traceMainLoop "added transaction change output" "prebalancedTx"
       prebalancedTx
@@ -290,21 +303,47 @@ addLovelacesToTransactionOutput txOutput = do
   pure $ wrap txOutputRec
     { amount = mkValue newCoin (getNonAdaAsset txOutputValue) }
 
--- | Generates change outputs to return all excess `Value` back to the owner's 
--- | address. If necessary, adds lovelaces to the generated change outputs to 
+-- | Accounts for:
+-- |
+-- | - stake registration deposit
+-- | - stake deregistration deposit returns
+-- | - stake withdrawals fees
+getStakingBalance :: Transaction -> Coin -> Coin
+getStakingBalance tx depositLovelacesPerCert =
+  let
+    stakeDeposits :: BigInt
+    stakeDeposits =
+      (tx ^. _body <<< _certs) # fold
+        >>> map
+          ( case _ of
+              StakeRegistration _ -> unwrap depositLovelacesPerCert
+              StakeDeregistration _ -> zero - unwrap depositLovelacesPerCert
+              _ -> zero
+          )
+        >>> sum
+    stakeWithdrawals =
+      unwrap $ fold $ foldl (Map.unionWith append) Map.empty $ tx ^. _body <<<
+        _withdrawals
+    fee = stakeDeposits - stakeWithdrawals
+  in
+    Coin fee
+
+-- | Generates change outputs to return all excess `Value` back to the owner's
+-- | address. If necessary, adds lovelaces to the generated change outputs to
 -- | cover the utxo min-ada-value requirement.
--- | 
--- | If the `maxChangeOutputTokenQuantity` constraint is set, partitions the 
--- | change `Value` into smaller `Value`s (where the Ada amount and the quantity 
--- | of each token is equipartitioned across the resultant `Value`s; and no 
--- | token quantity in any of the resultant `Value`s exceeds the given upper 
--- | bound). Then builds `TransactionChangeOutput`s using those `Value`s. 
+-- |
+-- | If the `maxChangeOutputTokenQuantity` constraint is set, partitions the
+-- | change `Value` into smaller `Value`s (where the Ada amount and the quantity
+-- | of each token is equipartitioned across the resultant `Value`s; and no
+-- | token quantity in any of the resultant `Value`s exceeds the given upper
+-- | bound). Then builds `TransactionChangeOutput`s using those `Value`s.
 genTransactionChangeOutputs
   :: ChangeAddress
   -> UtxoMap
+  -> Coin
   -> UnattachedUnbalancedTx
   -> BalanceTxM (Array TransactionChangeOutput)
-genTransactionChangeOutputs changeAddress utxos tx = do
+genTransactionChangeOutputs changeAddress utxos certsFee tx = do
   let
     txBody :: TxBody
     txBody = tx ^. _body'
@@ -315,7 +354,10 @@ genTransactionChangeOutputs changeAddress utxos tx = do
     changeValue :: Value
     changeValue = posValue $
       (totalInputValue <> mintValue txBody)
-        `minus` (totalOutputValue txBody <> minFeeValue txBody)
+        `minus`
+          ( totalOutputValue txBody <> minFeeValue txBody <> coinToValue
+              certsFee
+          )
 
     mkChangeOutput :: Value -> TransactionChangeOutput
     mkChangeOutput amount =
@@ -344,10 +386,12 @@ genTransactionChangeOutputs changeAddress utxos tx = do
 addTransactionChangeOutputs
   :: ChangeAddress
   -> UtxoMap
+  -> Coin
   -> UnattachedUnbalancedTx
   -> BalanceTxM PrebalancedTransaction
-addTransactionChangeOutputs changeAddress utxos unbalancedTx = do
-  changeOutputs <- genTransactionChangeOutputs changeAddress utxos unbalancedTx
+addTransactionChangeOutputs changeAddress utxos certsFee unbalancedTx = do
+  changeOutputs <- genTransactionChangeOutputs changeAddress utxos certsFee
+    unbalancedTx
   pure $ PrebalancedTransaction $
     unbalancedTx # _body' <<< _outputs %~ flip append changeOutputs
 
@@ -362,9 +406,10 @@ addTransactionChangeOutputs changeAddress utxos unbalancedTx = do
 addTransactionInputs
   :: ChangeAddress
   -> UtxoMap
+  -> Coin
   -> UnattachedUnbalancedTx
   -> BalanceTxM UnattachedUnbalancedTx
-addTransactionInputs changeAddress utxos unbalancedTx = do
+addTransactionInputs changeAddress utxos certsFee unbalancedTx = do
   let
     txBody :: TxBody
     txBody = unbalancedTx ^. _body'
@@ -376,7 +421,7 @@ addTransactionInputs changeAddress utxos unbalancedTx = do
     nonMintedValue = totalOutputValue txBody `minus` mintValue txBody
 
   txChangeOutputs <-
-    genTransactionChangeOutputs changeAddress utxos unbalancedTx
+    genTransactionChangeOutputs changeAddress utxos certsFee unbalancedTx
 
   nonSpendableInputs <- asksConstraints Constraints._nonSpendableInputs
 
@@ -385,7 +430,8 @@ addTransactionInputs changeAddress utxos unbalancedTx = do
     changeValue = foldMap getAmount txChangeOutputs
 
     requiredInputValue :: Value
-    requiredInputValue = nonMintedValue <> minFeeValue txBody <> changeValue
+    requiredInputValue = nonMintedValue <> minFeeValue txBody <> changeValue <>
+      coinToValue certsFee
 
     spendableUtxos :: UtxoMap
     spendableUtxos =
@@ -398,7 +444,7 @@ addTransactionInputs changeAddress utxos unbalancedTx = do
     true ->
       pure unbalancedTx
     false ->
-      addTransactionInputs changeAddress utxos
+      addTransactionInputs changeAddress utxos certsFee
         (unbalancedTx # _body' <<< _inputs %~ Set.union newTxInputs)
 
 collectTransactionInputs

@@ -94,7 +94,11 @@ type InitialUTxODistribution = Array InitialUTxOs
 newtype ClusterStartupRequest = ClusterStartupRequest
   { keysToGenerate :: InitialUTxODistribution }
 
-derive newtype instance EncodeAeson ClusterStartupRequest
+instance EncodeAeson ClusterStartupRequest where
+  encodeAeson'
+    ( ClusterStartupRequest { keysToGenerate }
+    ) =
+    encodeAeson' { keysToGenerate }
 
 newtype PrivateKeyResponse = PrivateKeyResponse PrivateKey
 

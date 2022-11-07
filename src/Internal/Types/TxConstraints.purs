@@ -4,41 +4,59 @@ module Ctl.Internal.Types.TxConstraints
   , InputWithScriptRef(RefInput, SpendInput)
   , OutputConstraint(OutputConstraint)
   , TxConstraint
-      ( MustIncludeDatum
-      , MustValidateIn
-      , MustBeSignedBy
-      , MustSpendAtLeast
-      , MustProduceAtLeast
-      , MustSpendPubKeyOutput
-      , MustSpendScriptOutput
-      , MustSpendNativeScriptOutput
-      , MustReferenceOutput
+      ( MustBeSignedBy
+      , MustDelegateStakePlutusScript
+      , MustDelegateStakeNativeScript
+      , MustDelegateStakePubKey
+      , MustDeregisterStakePlutusScript
+      , MustDeregisterStakeNativeScript
+      , MustDeregisterStakePubKey
+      , MustHashDatum
+      , MustIncludeDatum
       , MustMintValue
+      , MustMintValueUsingNativeScript
+      , MustNotBeValid
+      , MustPayToNativeScript
       , MustPayToPubKeyAddress
       , MustPayToScript
-      , MustPayToNativeScript
-      , MustHashDatum
+      , MustProduceAtLeast
+      , MustReferenceOutput
+      , MustRegisterPool
+      , MustRegisterStakePubKey
+      , MustRegisterStakeScript
+      , MustRetirePool
       , MustSatisfyAnyOf
-      , MustNotBeValid
-      , MustMintValueUsingNativeScript
+      , MustSpendAtLeast
+      , MustSpendNativeScriptOutput
+      , MustSpendPubKeyOutput
+      , MustSpendScriptOutput
+      , MustValidateIn
+      , MustWithdrawStakePlutusScript
+      , MustWithdrawStakeNativeScript
+      , MustWithdrawStakePubKey
       )
   , TxConstraints(TxConstraints)
   , addTxIn
   , isSatisfiable
-  , modifiesUtxoSet
   , mustBeSignedBy
+  , mustDelegateStakeNativeScript
+  , mustDelegateStakePlutusScript
+  , mustDelegateStakePubKey
+  , mustDeregisterStakeNativeScript
+  , mustDeregisterStakePlutusScript
+  , mustDeregisterStakePubKey
   , mustHashDatum
   , mustIncludeDatum
   , mustMintCurrency
+  , mustMintCurrencyUsingNativeScript
   , mustMintCurrencyUsingScriptRef
   , mustMintCurrencyWithRedeemer
   , mustMintCurrencyWithRedeemerUsingScriptRef
-  , mustMintCurrencyUsingNativeScript
   , mustMintValue
   , mustMintValueWithRedeemer
-  , mustPayToScript
+  , mustNotBeValid
   , mustPayToNativeScript
-  , mustPayToScriptWithScriptRef
+  , mustPayToNativeScriptAddress
   , mustPayToPubKey
   , mustPayToPubKeyAddress
   , mustPayToPubKeyAddressWithDatum
@@ -47,9 +65,17 @@ module Ctl.Internal.Types.TxConstraints
   , mustPayToPubKeyWithDatum
   , mustPayToPubKeyWithDatumAndScriptRef
   , mustPayToPubKeyWithScriptRef
+  , mustPayToScript
+  , mustPayToScriptAddress
+  , mustPayToScriptAddressWithScriptRef
+  , mustPayToScriptWithScriptRef
   , mustProduceAtLeast
   , mustProduceAtLeastTotal
   , mustReferenceOutput
+  , mustRegisterPool
+  , mustRegisterStakePubKey
+  , mustRegisterStakeScript
+  , mustRetirePool
   , mustSatisfyAnyOf
   , mustSpendAtLeast
   , mustSpendAtLeastTotal
@@ -58,7 +84,9 @@ module Ctl.Internal.Types.TxConstraints
   , mustSpendScriptOutput
   , mustSpendScriptOutputUsingScriptRef
   , mustValidateIn
-  , mustNotBeValid
+  , mustWithdrawStakeNativeScript
+  , mustWithdrawStakePlutusScript
+  , mustWithdrawStakePubKey
   , pubKeyPayments
   , requiredDatums
   , requiredMonetaryPolicies
@@ -71,7 +99,13 @@ import Prelude hiding (join)
 
 import Ctl.Internal.Cardano.Types.NativeScript (NativeScript)
 import Ctl.Internal.Cardano.Types.ScriptRef (ScriptRef)
+import Ctl.Internal.Cardano.Types.Transaction
+  ( Epoch
+  , PoolPubKeyHash
+  , PoolRegistrationParams
+  )
 import Ctl.Internal.NativeScripts (NativeScriptHash)
+import Ctl.Internal.Plutus.Types.Credential (Credential)
 import Ctl.Internal.Plutus.Types.CurrencySymbol
   ( CurrencySymbol
   , currencyMPSHash
@@ -80,7 +114,7 @@ import Ctl.Internal.Plutus.Types.Transaction (TransactionOutputWithRefScript)
 import Ctl.Internal.Plutus.Types.TransactionUnspentOutput
   ( TransactionUnspentOutput(TransactionUnspentOutput)
   )
-import Ctl.Internal.Plutus.Types.Value (Value, flattenNonAdaAssets, isZero)
+import Ctl.Internal.Plutus.Types.Value (Value, flattenNonAdaAssets)
 import Ctl.Internal.Types.Datum (Datum)
 import Ctl.Internal.Types.Interval
   ( POSIXTimeRange
@@ -90,14 +124,20 @@ import Ctl.Internal.Types.Interval
   )
 import Ctl.Internal.Types.PubKeyHash (PaymentPubKeyHash, StakePubKeyHash)
 import Ctl.Internal.Types.Redeemer (Redeemer, unitRedeemer)
-import Ctl.Internal.Types.Scripts (MintingPolicyHash, ValidatorHash)
+import Ctl.Internal.Types.Scripts
+  ( MintingPolicyHash
+  , NativeScriptStakeValidator
+  , PlutusScriptStakeValidator
+  , StakeValidatorHash
+  , ValidatorHash
+  )
 import Ctl.Internal.Types.TokenName (TokenName)
 import Ctl.Internal.Types.Transaction (DataHash, TransactionInput)
-import Data.Array (concat, (:))
+import Data.Array ((:))
 import Data.Array as Array
 import Data.Bifunctor (class Bifunctor)
 import Data.BigInt (BigInt)
-import Data.Foldable (class Foldable, any, foldMap, foldl, foldr, null)
+import Data.Foldable (class Foldable, foldMap, foldl, foldr)
 import Data.Generic.Rep (class Generic)
 import Data.Lattice (join)
 import Data.Map (Map, fromFoldableWith, toUnfoldable)
@@ -134,9 +174,25 @@ data TxConstraint
       (Maybe (Datum /\ DatumPresence))
       (Maybe ScriptRef)
       Value
-  | MustPayToNativeScript NativeScriptHash Value
-  | MustPayToScript ValidatorHash Datum DatumPresence (Maybe ScriptRef) Value
+  | MustPayToNativeScript NativeScriptHash (Maybe Credential) Value
+  | MustPayToScript ValidatorHash (Maybe Credential) Datum DatumPresence
+      (Maybe ScriptRef)
+      Value
   | MustHashDatum DataHash Datum
+  | MustRegisterStakePubKey StakePubKeyHash
+  | MustDeregisterStakePubKey StakePubKeyHash
+  | MustRegisterStakeScript StakeValidatorHash
+  | MustDeregisterStakePlutusScript PlutusScriptStakeValidator Redeemer
+  | MustDeregisterStakeNativeScript NativeScriptStakeValidator
+  | MustRegisterPool PoolRegistrationParams
+  | MustRetirePool PoolPubKeyHash Epoch
+  | MustDelegateStakePubKey StakePubKeyHash PoolPubKeyHash
+  | MustDelegateStakePlutusScript PlutusScriptStakeValidator Redeemer
+      PoolPubKeyHash
+  | MustDelegateStakeNativeScript NativeScriptStakeValidator PoolPubKeyHash
+  | MustWithdrawStakePubKey StakePubKeyHash
+  | MustWithdrawStakePlutusScript PlutusScriptStakeValidator Redeemer
+  | MustWithdrawStakeNativeScript NativeScriptStakeValidator
   | MustSatisfyAnyOf (Array (Array TxConstraint))
   | MustNotBeValid
 
@@ -146,8 +202,8 @@ derive instance Generic TxConstraint _
 instance Show TxConstraint where
   show x = genericShow x
 
--- | `InputWithScriptRef` specifies whether the underlying utxo with the 
--- | reference script should be included in the transaction as a reference 
+-- | `InputWithScriptRef` specifies whether the underlying utxo with the
+-- | reference script should be included in the transaction as a reference
 -- | input.
 data InputWithScriptRef
   -- | `RefInput` asserts the utxo containing the reference script should be
@@ -389,11 +445,23 @@ mustPayToScript
   -> Value
   -> TxConstraints i o
 mustPayToScript vh dt dtp vl =
-  singleton (MustPayToScript vh dt dtp Nothing vl)
+  singleton (MustPayToScript vh Nothing dt dtp Nothing vl)
     <> guard (dtp == DatumWitness) (singleton $ MustIncludeDatum dt)
 
--- | Lock the value, datum and reference script with a script. 
--- | Note that the provided reference script does *not* necessarily need to 
+mustPayToScriptAddress
+  :: forall (i :: Type) (o :: Type)
+   . ValidatorHash
+  -> Credential
+  -> Datum
+  -> DatumPresence
+  -> Value
+  -> TxConstraints i o
+mustPayToScriptAddress vh credential dt dtp vl =
+  singleton (MustPayToScript vh (Just credential) dt dtp Nothing vl)
+    <> guard (dtp == DatumWitness) (singleton $ MustIncludeDatum dt)
+
+-- | Lock the value, datum and reference script with a script.
+-- | Note that the provided reference script does *not* necessarily need to
 -- | control the spending of the output, i.e. both scripts can be different.
 mustPayToScriptWithScriptRef
   :: forall (i :: Type) (o :: Type)
@@ -404,7 +472,23 @@ mustPayToScriptWithScriptRef
   -> Value
   -> TxConstraints i o
 mustPayToScriptWithScriptRef vh dt dtp scriptRef vl =
-  singleton (MustPayToScript vh dt dtp (Just scriptRef) vl)
+  singleton (MustPayToScript vh Nothing dt dtp (Just scriptRef) vl)
+    <> guard (dtp == DatumWitness) (singleton $ MustIncludeDatum dt)
+
+-- | Lock the value, datum and reference script with a script.
+-- | Note that the provided reference script does *not* necessarily need to
+-- | control the spending of the output, i.e. both scripts can be different.
+mustPayToScriptAddressWithScriptRef
+  :: forall (i :: Type) (o :: Type)
+   . ValidatorHash
+  -> Credential
+  -> Datum
+  -> DatumPresence
+  -> ScriptRef
+  -> Value
+  -> TxConstraints i o
+mustPayToScriptAddressWithScriptRef vh credential dt dtp scriptRef vl =
+  singleton (MustPayToScript vh (Just credential) dt dtp (Just scriptRef) vl)
     <> guard (dtp == DatumWitness) (singleton $ MustIncludeDatum dt)
 
 mustPayToNativeScript
@@ -413,13 +497,24 @@ mustPayToNativeScript
   -> Value
   -> TxConstraints i o
 mustPayToNativeScript nsHash vl =
-  singleton (MustPayToNativeScript nsHash vl)
+  singleton (MustPayToNativeScript nsHash Nothing vl)
+
+mustPayToNativeScriptAddress
+  :: forall (i :: Type) (o :: Type)
+   . NativeScriptHash
+  -> Credential
+  -> Value
+  -> TxConstraints i o
+mustPayToNativeScriptAddress nsHash credential vl =
+  singleton (MustPayToNativeScript nsHash (Just credential) vl)
 
 -- | Mint the given `Value`
+-- | The amount to mint must not be zero.
 mustMintValue :: forall (i :: Type) (o :: Type). Value -> TxConstraints i o
 mustMintValue = mustMintValueWithRedeemer unitRedeemer
 
 -- | Mint the given `Value` by accessing non-Ada assets.
+-- | The amount to mint must not be zero.
 mustMintValueWithRedeemer
   :: forall (i :: Type) (o :: Type)
    . Redeemer
@@ -437,6 +532,7 @@ mustMintValueWithRedeemer redeemer =
       mustMintCurrencyWithRedeemer mintingPolicyHash redeemer tn amount
 
 -- | Create the given amount of the currency.
+-- | The amount to mint must not be zero.
 mustMintCurrency
   :: forall (i :: Type) (o :: Type)
    . MintingPolicyHash
@@ -456,6 +552,7 @@ mustMintCurrencyUsingNativeScript ns tk i = singleton
   (MustMintValueUsingNativeScript ns tk i)
 
 -- | Create the given amount of the currency using a reference minting policy.
+-- | The amount to mint must not be zero.
 mustMintCurrencyUsingScriptRef
   :: forall (i :: Type) (o :: Type)
    . MintingPolicyHash
@@ -467,6 +564,7 @@ mustMintCurrencyUsingScriptRef mph =
   mustMintCurrencyWithRedeemerUsingScriptRef mph unitRedeemer
 
 -- | Create the given amount of the currency.
+-- | The amount to mint must not be zero.
 mustMintCurrencyWithRedeemer
   :: forall (i :: Type) (o :: Type)
    . MintingPolicyHash
@@ -478,6 +576,7 @@ mustMintCurrencyWithRedeemer mph red tn amount =
   singleton (MustMintValue mph red tn amount Nothing)
 
 -- | Create the given amount of the currency using a reference minting policy.
+-- | The amount to mint must not be zero.
 mustMintCurrencyWithRedeemerUsingScriptRef
   :: forall (i :: Type) (o :: Type)
    . MintingPolicyHash
@@ -511,7 +610,7 @@ mustSpendScriptOutput
 mustSpendScriptOutput txOutRef red =
   singleton (MustSpendScriptOutput txOutRef red Nothing)
 
--- | Spend the given unspent transaction script output, using a reference script 
+-- | Spend the given unspent transaction script output, using a reference script
 -- | to satisfy the script witnessing requirement.
 mustSpendScriptOutputUsingScriptRef
   :: forall (i :: Type) (o :: Type)
@@ -533,6 +632,66 @@ mustSpendNativeScriptOutput txOutRef = singleton <<< MustSpendNativeScriptOutput
 mustHashDatum
   :: forall (i :: Type) (o :: Type). DataHash -> Datum -> TxConstraints i o
 mustHashDatum dhsh = singleton <<< MustHashDatum dhsh
+
+mustRegisterStakePubKey :: forall i o. StakePubKeyHash -> TxConstraints i o
+mustRegisterStakePubKey = singleton <<< MustRegisterStakePubKey
+
+mustDeregisterStakePubKey :: forall i o. StakePubKeyHash -> TxConstraints i o
+mustDeregisterStakePubKey = singleton <<< MustDeregisterStakePubKey
+
+mustRegisterStakeScript :: forall i o. StakeValidatorHash -> TxConstraints i o
+mustRegisterStakeScript = singleton <<< MustRegisterStakeScript
+
+mustDeregisterStakePlutusScript
+  :: forall i o. PlutusScriptStakeValidator -> Redeemer -> TxConstraints i o
+mustDeregisterStakePlutusScript sv = singleton <<<
+  MustDeregisterStakePlutusScript sv
+
+mustDeregisterStakeNativeScript
+  :: forall i o. NativeScriptStakeValidator -> TxConstraints i o
+mustDeregisterStakeNativeScript = singleton <<< MustDeregisterStakeNativeScript
+
+mustRegisterPool :: forall i o. PoolRegistrationParams -> TxConstraints i o
+mustRegisterPool = singleton <<< MustRegisterPool
+
+mustRetirePool :: forall i o. PoolPubKeyHash -> Epoch -> TxConstraints i o
+mustRetirePool poolPubKeyHash = singleton <<< MustRetirePool poolPubKeyHash
+
+mustDelegateStakePubKey
+  :: forall i o. StakePubKeyHash -> PoolPubKeyHash -> TxConstraints i o
+mustDelegateStakePubKey spkh ppkh = singleton $ MustDelegateStakePubKey spkh
+  ppkh
+
+mustDelegateStakePlutusScript
+  :: forall i o
+   . PlutusScriptStakeValidator
+  -> Redeemer
+  -> PoolPubKeyHash
+  -> TxConstraints i o
+mustDelegateStakePlutusScript sv redeemer ppkh = singleton $
+  MustDelegateStakePlutusScript sv redeemer ppkh
+
+mustDelegateStakeNativeScript
+  :: forall i o
+   . NativeScriptStakeValidator
+  -> PoolPubKeyHash
+  -> TxConstraints i o
+mustDelegateStakeNativeScript sv ppkh =
+  singleton $ MustDelegateStakeNativeScript sv ppkh
+
+mustWithdrawStakePubKey
+  :: forall i o. StakePubKeyHash -> TxConstraints i o
+mustWithdrawStakePubKey spkh = singleton $ MustWithdrawStakePubKey spkh
+
+mustWithdrawStakePlutusScript
+  :: forall i o. PlutusScriptStakeValidator -> Redeemer -> TxConstraints i o
+mustWithdrawStakePlutusScript validator redeemer =
+  singleton $ MustWithdrawStakePlutusScript validator redeemer
+
+mustWithdrawStakeNativeScript
+  :: forall i o. NativeScriptStakeValidator -> TxConstraints i o
+mustWithdrawStakeNativeScript =
+  singleton <<< MustWithdrawStakeNativeScript
 
 -- | Attempts to solve, in order, a sequence of constraints until the first
 -- | successful try.
@@ -629,32 +788,3 @@ requiredDatums = foldMap f <<< _.constraints <<< unwrap
   f :: TxConstraint -> Array Datum
   f (MustIncludeDatum dt) = Array.singleton dt
   f _ = []
-
--- | Check whether every transaction that satisfies the constraints has to
--- | modify the UTXO set.
-modifiesUtxoSet :: forall (i :: Type) (o :: Type). TxConstraints i o -> Boolean
-modifiesUtxoSet (TxConstraints { constraints, ownInputs, ownOutputs }) =
-  let
-    requiresInputOutput :: TxConstraint -> Boolean
-    requiresInputOutput = case _ of
-      MustBeSignedBy _ -> false
-      MustHashDatum _ _ -> false
-      MustIncludeDatum _ -> false
-      MustMintValue _ _ _ _ _ -> true
-      MustMintValueUsingNativeScript _ _ _ -> true
-      MustNotBeValid -> false
-      MustPayToNativeScript _ vl -> not (isZero vl)
-      MustPayToPubKeyAddress _ _ _ _ vl -> not (isZero vl)
-      MustPayToScript _ _ _ _ vl -> not (isZero vl)
-      MustProduceAtLeast _ -> true
-      MustReferenceOutput _ -> false
-      MustSatisfyAnyOf xs -> any requiresInputOutput $ concat xs
-      MustSpendAtLeast _ -> true
-      MustSpendNativeScriptOutput _ _ -> true
-      MustSpendPubKeyOutput _ -> true
-      MustSpendScriptOutput _ _ _ -> true
-      MustValidateIn _ -> false
-  in
-    any requiresInputOutput constraints
-      || not (null ownInputs)
-      || not (null ownOutputs)

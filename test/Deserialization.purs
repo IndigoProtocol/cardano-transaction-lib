@@ -3,7 +3,13 @@ module Test.Ctl.Deserialization (suite) where
 import Prelude
 
 import Contract.Address (ByteArray)
-import Control.Monad.Error.Class (class MonadThrow)
+import Control.Monad.Error.Class (class MonadThrow, liftMaybe)
+import Ctl.Examples.OtherTypeTextEnvelope (otherTypeTextEnvelope)
+import Ctl.Internal.Cardano.TextEnvelope
+  ( TextEnvelope(TextEnvelope)
+  , TextEnvelopeType(Other)
+  , decodeTextEnvelope
+  )
 import Ctl.Internal.Cardano.Types.NativeScript (NativeScript(ScriptAny)) as T
 import Ctl.Internal.Cardano.Types.Transaction (Transaction, TransactionOutput) as T
 import Ctl.Internal.Cardano.Types.TransactionUnspentOutput
@@ -42,8 +48,8 @@ import Data.Newtype (unwrap)
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Class (class MonadEffect, liftEffect)
-import Effect.Exception (Error)
-import Mote (group, test)
+import Effect.Exception (Error, error)
+import Mote (group, skip, test)
 import Test.Ctl.Fixtures
   ( nativeScriptFixture1
   , nativeScriptFixture2
@@ -204,12 +210,12 @@ suite = do
       test "fixture #7" do
         liftEffect $ testNativeScript nativeScriptFixture7
       -- This is here just to acknowledge the problem
-      test "too much nesting leads to recursion error" do
+      skip $ test "too much nesting leads to recursion error" do
         expectError $ do
           let
             longNativeScript =
               Array.foldr (\_ acc -> T.ScriptAny [ acc ]) nativeScriptFixture1 $
-                Array.range 0 5000
+                Array.range 0 50 -- change this to 50000
           liftEffect $ testNativeScript longNativeScript
     group "WitnessSet - deserialization is inverse to serialization" do
       let
@@ -232,6 +238,11 @@ suite = do
       test "fixture #3" $ witnessSetRoundTrip witnessSetFixture3
       -- TODO: enable when nativeScripts are implemented
       test "fixture #4" $ witnessSetRoundTrip witnessSetFixture4
+    group "TextEnvelope decoding" do
+      test "Decoding TestEnvelope with some other type" do
+        TextEnvelope envelope <- liftMaybe (error "Unexpected parsing error") $
+          decodeTextEnvelope otherTypeTextEnvelope
+        envelope.type_ `shouldEqual` (Other "SomeOtherType")
 
 createUnspentOutput
   :: T.TransactionInput
@@ -247,7 +258,7 @@ testNativeScript input = do
   serialized <- pure $ NSS.convertNativeScript input
   {-            ^^^^ This is necessary here as convertNativeScript can throw
                 a maximum call stack size runtime error (see excessive nesting
-                test above). It needs to be lifted into the Effect monad for 
+                test above). It needs to be lifted into the Effect monad for
                 purescript to handle it correctly.
   -}
 

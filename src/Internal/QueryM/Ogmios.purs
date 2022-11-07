@@ -47,6 +47,7 @@ module Ctl.Internal.QueryM.Ogmios
   , TxEvaluationFailure(UnparsedError, ScriptFailures)
   , TxEvaluationResult(TxEvaluationResult)
   , TxEvaluationR(TxEvaluationR)
+  , PoolIdsR
   , TxHash
   , UtxoQR(UtxoQR)
   , UtxoQueryResult
@@ -54,6 +55,7 @@ module Ctl.Internal.QueryM.Ogmios
   , aesonArray
   , aesonObject
   , evaluateTxCall
+  , queryPoolIdsCall
   , mempoolSnapshotHasTxCall
   , mkOgmiosCallType
   , queryChainTipCall
@@ -64,6 +66,8 @@ module Ctl.Internal.QueryM.Ogmios
   , queryUtxoCall
   , queryUtxosAtCall
   , queryUtxosCall
+  , queryPoolParameters
+  , queryDelegationsAndRewards
   , submitTxCall
   , slotLengthFactor
   ) where
@@ -109,6 +113,7 @@ import Ctl.Internal.Cardano.Types.Transaction
   , ExUnitPrices
   , ExUnits
   , Nonce
+  , PoolPubKeyHash
   , SubCoin
   )
 import Ctl.Internal.Cardano.Types.Transaction as T
@@ -162,13 +167,7 @@ import Data.Map as Map
 import Data.Maybe (Maybe(Just, Nothing), fromJust, fromMaybe, maybe)
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Show.Generic (genericShow)
-import Data.String
-  ( Pattern(Pattern)
-  , indexOf
-  , split
-  , splitAt
-  , uncons
-  )
+import Data.String (Pattern(Pattern), indexOf, split, splitAt, uncons)
 import Data.String.Common (split) as String
 import Data.Traversable (for, sequence, traverse)
 import Data.Tuple (snd, uncurry)
@@ -220,6 +219,28 @@ queryChainTipCall :: JsonWspCall Unit ChainTipQR
 queryChainTipCall = mkOgmiosCallType
   { methodname: "Query"
   , args: const { query: "chainTip" }
+  }
+
+queryPoolIdsCall :: JsonWspCall Unit PoolIdsR
+queryPoolIdsCall = mkOgmiosCallType
+  { methodname: "Query"
+  , args: const { query: "poolIds" }
+  }
+
+queryPoolParameters :: JsonWspCall (Array PoolPubKeyHash) Aeson
+queryPoolParameters = mkOgmiosCallType
+  { methodname: "Query"
+  , args: \params -> { query: { poolParameters: params } }
+  }
+
+queryDelegationsAndRewards :: JsonWspCall (Array String) Aeson
+queryDelegationsAndRewards = mkOgmiosCallType
+  { methodname: "Query"
+  , args: \skhs ->
+      { query:
+          { delegationsAndRewards: skhs
+          }
+      }
   }
 
 -- | Queries Ogmios for utxos at given addresses.
@@ -1163,6 +1184,10 @@ type ChainPoint =
   -- for details on why we lose a neglible amount of precision.
   , hash :: OgmiosBlockHeaderHash
   }
+
+---------------- POOL ID RESPONSE
+
+type PoolIdsR = Array PoolPubKeyHash
 
 ---------------- ADDITIONAL UTXO MAP REQUEST
 

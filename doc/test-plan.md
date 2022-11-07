@@ -31,10 +31,8 @@ CTL's primary user interface is its constraints and lookups API, modeled after t
 - [x] `mustMintValueWithRedeemer` (`mintingPolicy`). Also implies
   - `mustMintCurrencyWithRedeemer`
 - [x] `mustSpendScriptOutput`
-- [ ] `mustSpendPubKeyOutput`
-  - **Note**: This constraint is included in our stake key integration with Plutip. We should still write a full contract that uses it
-- [ ] `mustBeSignedBy`
-  - **Note**: This constraint is also included in our Plutip stake key integration, as with `mustSpendPubKeyOutput`
+- [x] `mustSpendPubKeyOutput`
+- [x] `mustBeSignedBy`
 - [x] `mustHashDatum`
 - [x] `mustIncludeDatum`
 - [x] `mustPayToPubKeyWithDatum`
@@ -67,6 +65,38 @@ In addition, several redeemer combinations in a **single transaction** must be c
 - [x] Two or more `Mint` redeemers
 - [ ] Two or more `Spend` redeemers
 - [ ] (At least) One each of a `Spend` and `Mint` redeemer
+
+#### Stake operations
+
+New constraints for operations with stake will be added in `v3`.
+
+##### Stake pools
+
+- [x] mustRegisterPool
+- [x] mustRetirePool
+
+##### Stake credential registration
+
+- [x] mustRegisterStakePubKey
+- [x] mustRegisterStakeScript
+
+##### Delegation
+
+- [x] mustDelegateStakePubKey
+- [x] mustDelegateStakePlutusScript
+- [x] mustDelegateStakeNativeScript
+
+##### Rewards withdrawal
+
+- [x] mustWithdrawStakePubKey
+- [x] mustWithdrawStakePlutusScript
+- [x] mustWithdrawStakeNativeScript
+
+##### Stake credential deregistration
+
+- [x] mustDeregisterStakePubKey
+- [x] mustDeregisterStakePlutusScript
+- [x] mustDeregisterStakeNativeScript
 
 #### Exceptions
 

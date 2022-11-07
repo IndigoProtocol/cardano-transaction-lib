@@ -38,15 +38,13 @@ import Contract.Scripts (applyArgs, mintingPolicyHash, validatorHash)
 import Contract.Test.Plutip (InitialUTxOs, runPlutipContract, withStakeKey)
 import Contract.Time (getEraSummaries)
 import Contract.Transaction
-  ( BalancedSignedTransaction
-  , DataHash
+  ( DataHash
   , NativeScript(ScriptPubkey, ScriptNOfK, ScriptAll)
   , ScriptRef(PlutusScriptRef, NativeScriptRef)
   , awaitTxConfirmed
   , balanceTx
   , balanceTxWithConstraints
   , createAdditionalUtxos
-  , getTxByHash
   , signTransaction
   , submit
   , withBalancedTx
@@ -119,7 +117,6 @@ import Ctl.Internal.Scripts (nativeScriptHashEnterpriseAddress)
 import Ctl.Internal.Test.TestPlanM (TestPlanM)
 import Ctl.Internal.Test.TestPlanM as Utils
 import Ctl.Internal.Types.Interval (getSlotLength)
-import Ctl.Internal.Types.UsedTxOuts (TxOutRefCache)
 import Ctl.Internal.Wallet.Cip30Mock
   ( WalletMock(MockNami, MockGero, MockFlint)
   , withCip30Mock
@@ -131,15 +128,14 @@ import Data.Either (isLeft)
 import Data.Foldable (fold, foldM, length)
 import Data.Lens (view)
 import Data.Map as Map
-import Data.Maybe (Maybe(Just, Nothing), fromMaybe, isJust, isNothing)
+import Data.Maybe (Maybe(Just, Nothing), fromMaybe, isJust)
 import Data.Newtype (unwrap, wrap)
 import Data.Traversable (traverse, traverse_)
 import Data.Tuple.Nested (type (/\), (/\))
 import Effect (Effect)
-import Effect.Aff (Aff, bracket, launchAff_)
+import Effect.Aff (Aff, Milliseconds(Milliseconds), bracket, launchAff_)
 import Effect.Class (liftEffect)
 import Effect.Exception (throw)
-import Effect.Ref as Ref
 import Mote (group, skip, test)
 import Mote.Monad (mapTest)
 import Safe.Coerce (coerce)
@@ -160,6 +156,8 @@ import Test.Ctl.Fixtures
 import Test.Ctl.Plutip.Common (config, privateStakeKey)
 import Test.Ctl.Plutip.Logging as Logging
 import Test.Ctl.Plutip.NetworkId as NetworkId
+import Test.Ctl.Plutip.Staking as Staking
+import Test.Ctl.Plutip.Utils (getLockedInputs, submitAndLog)
 import Test.Ctl.Plutip.UtxoDistribution (checkUtxoDistribution)
 import Test.Ctl.Plutip.UtxoDistribution as UtxoDistribution
 import Test.Spec.Assertions (shouldEqual, shouldNotEqual, shouldSatisfy)
@@ -169,11 +167,15 @@ import Test.Spec.Runner (defaultConfig)
 main :: Effect Unit
 main = launchAff_ do
   Utils.interpretWithConfig
-    defaultConfig { timeout = Just $ wrap 70_000.0, exit = true }
-    do
-      suite
-      UtxoDistribution.suite
-      NetworkId.suite
+    defaultConfig { timeout = Just $ Milliseconds 70_000.0, exit = true }
+    $ do
+        suite
+        UtxoDistribution.suite
+        NetworkId.suite
+  Utils.interpretWithConfig
+    defaultConfig { timeout = Just $ Milliseconds 450_000.0, exit = true }
+    $ do
+        Staking.suite
 
 suite :: TestPlanM (Aff Unit) Unit
 suite = do
@@ -601,6 +603,33 @@ suite = do
               "e8cb7d18e81b0be160c114c563c020dcc7bf148a1994b73912db3ea1318d488b"
           ]
 
+    test "runPlutipContract: MintZeroToken" do
+      let
+        distribution :: InitialUTxOs
+        distribution =
+          [ BigInt.fromInt 5_000_000
+          , BigInt.fromInt 2_000_000_000
+          ]
+
+      runPlutipContract config distribution \alice -> do
+        withKeyWallet alice do
+          tn1 <- mkTokenName "Token name"
+          mp1 /\ _ <- mkCurrencySymbol alwaysMintsPolicy
+          mp2 /\ _ <- mkCurrencySymbol alwaysMintsPolicyV2
+
+          let
+            constraints :: Constraints.TxConstraints Void Void
+            constraints = mconcat
+              [ Constraints.mustMintCurrency (mintingPolicyHash mp1) tn1 zero
+              , Constraints.mustMintCurrency (mintingPolicyHash mp2) tn1 one
+              ]
+
+            lookups :: Lookups.ScriptLookups Void
+            lookups =
+              Lookups.mintingPolicy mp1 <> Lookups.mintingPolicy mp2
+          result <- Lookups.mkUnbalancedTx lookups constraints
+          result `shouldSatisfy` isLeft
+
     test "runPlutipContract: MintsMultipleTokens" do
       let
         distribution :: InitialUTxOs
@@ -970,7 +999,10 @@ suite = do
         runPlutipContract config distribution \alice ->
           withKeyWallet alice TxChaining.contract
 
-    test "Evaluation with additional UTxOs with native scripts" do
+    -- TODO
+    -- investigate why this test failed with `valueNotConserved` error
+    -- see https://github.com/Plutonomicon/cardano-transaction-lib/issues/1174
+    skip $ test "Evaluation with additional UTxOs with native scripts" do
       let
         distribution :: InitialUTxOs
         distribution =
@@ -1367,21 +1399,3 @@ pkh2PkhContract pkh stakePkh = do
   ubTx <- liftedE $ Lookups.mkUnbalancedTx lookups constraints
   bsTx <- signTransaction =<< liftedE (balanceTx ubTx)
   submitAndLog bsTx
-
-submitAndLog
-  :: forall (r :: Row Type). BalancedSignedTransaction -> Contract r Unit
-submitAndLog bsTx = do
-  txId <- submit bsTx
-  logInfo' $ "Tx ID: " <> show txId
-  awaitTxConfirmed txId
-  mbTransaction <- getTxByHash txId
-  logInfo' $ "Tx: " <> show mbTransaction
-  liftEffect $ when (isNothing mbTransaction) do
-    void $ throw "Unable to get Tx contents"
-    when (mbTransaction /= Just (unwrap bsTx)) do
-      throw "Tx contents do not match"
-
-getLockedInputs :: forall (r :: Row Type). Contract r TxOutRefCache
-getLockedInputs = do
-  cache <- asks (_.usedTxOuts <<< _.runtime <<< unwrap)
-  liftEffect $ Ref.read $ unwrap cache

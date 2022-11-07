@@ -36,9 +36,11 @@ import Ctl.Internal.Serialization.Address
 import Ctl.Internal.Serialization.Keys (publicKeyFromPrivateKey)
 import Ctl.Internal.Serialization.Types (PrivateKey)
 import Data.Array (fromFoldable)
+import Data.Foldable (fold)
 import Data.Lens (set)
 import Data.Maybe (Maybe(Just, Nothing))
 import Data.Newtype (unwrap)
+import Data.Traversable (for)
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
@@ -95,7 +97,7 @@ privateKeysToKeyWallet payKey mbStakeKey = KeyWallet
     let pubPayKey = publicKeyFromPrivateKey (unwrap payKey)
     case mbStakeKey of
       Just stakeKey -> do
-        pubStakeKey <- pure $ publicKeyFromPrivateKey (unwrap stakeKey)
+        let pubStakeKey = publicKeyFromPrivateKey (unwrap stakeKey)
         pure $ baseAddressToAddress $
           baseAddress
             { network
@@ -121,7 +123,13 @@ privateKeysToKeyWallet payKey mbStakeKey = KeyWallet
   signTx (Transaction tx) = liftEffect do
     txBody <- Serialization.convertTxBody tx.body
     hash <- Serialization.hashTransaction txBody
-    wit <- Deserialization.WitnessSet.convertVkeyWitness <$>
+    payWitness <- Deserialization.WitnessSet.convertVkeyWitness <$>
       Serialization.makeVkeywitness hash (unwrap payKey)
-    let witnessSet' = set _vkeys (pure $ pure wit) mempty
+    mbStakeWitness <- for mbStakeKey \stakeKey -> do
+      Deserialization.WitnessSet.convertVkeyWitness <$>
+        Serialization.makeVkeywitness hash (unwrap stakeKey)
+    let
+      witnessSet' = set _vkeys
+        (pure $ [ payWitness ] <> fold (pure <$> mbStakeWitness))
+        mempty
     pure witnessSet'
