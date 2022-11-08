@@ -1060,7 +1060,7 @@ processConstraint mpsMap osMap = do
           do
             vHash <- liftM
               (CannotGetValidatorHashFromAddress address)
-              case (unwrap addr).addressCredential of
+              case (unwrap address).addressCredential of
                 ScriptCredential vh -> Just vh
                 _ -> Nothing
             case scriptRefUnspentOut of
