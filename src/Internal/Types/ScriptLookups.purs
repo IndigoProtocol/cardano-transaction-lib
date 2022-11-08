@@ -1061,7 +1061,7 @@ processConstraint mpsMap osMap = do
           do
             address' <- liftM
               (CannotGetValidatorHashFromAddress address) 
-              toPlutusAddress address
+              (toPlutusAddress address)
             vHash <- liftM
               (CannotGetValidatorHashFromAddress address)
               case (unwrap address').addressCredential of
