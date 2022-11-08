@@ -1058,9 +1058,10 @@ processConstraint mpsMap osMap = do
           throwError $ TxOutRefWrongType txo
         TransactionOutput { address, amount, datum: datum' } ->
           do
+            address' <- toPlutusAddress cslAddress
             vHash <- liftM
               (CannotGetValidatorHashFromAddress address)
-              case address.addressCredential of
+              case (unwrap address').addressCredential of
                 ScriptCredential vh -> Just vh
                 _ -> Nothing
             case scriptRefUnspentOut of
