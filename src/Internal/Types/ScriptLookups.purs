@@ -1060,7 +1060,9 @@ processConstraint mpsMap osMap = do
           do
             vHash <- liftM
               (CannotGetValidatorHashFromAddress address)
-              (enterpriseAddressValidatorHash address)
+              case (unwrap addr).addressCredential of
+                ScriptCredential vh -> Just vh
+                _ -> Nothing
             case scriptRefUnspentOut of
               Nothing -> do
                 plutusScript <-
