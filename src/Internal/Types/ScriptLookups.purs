@@ -108,6 +108,7 @@ import Ctl.Internal.Plutus.Conversion
   ( fromPlutusTxOutputWithRefScript
   , fromPlutusValue
   )
+import Ctl.Internal.Plutus.Conversion.Address (toPlutusAddress)
 import Ctl.Internal.Plutus.Types.Credential
   ( Credential(ScriptCredential, PubKeyCredential)
   )
