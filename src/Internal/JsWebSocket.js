@@ -45,6 +45,8 @@ exports._onWsConnect = ws => fn => () => {
 
 exports._onWsError = ws => fn => () => {
   const listener = function (event) {
+    console.log("Patched _onWsError call");
+    console.log(JSON.stringify(event));
     fn(event.toString())();
   };
   ws.addEventListener("error", listener);
