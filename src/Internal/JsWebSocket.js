@@ -1,6 +1,7 @@
 /* global BROWSER_RUNTIME */
 
 const ReconnectingWebSocket = require("reconnecting-websocket");
+const util = require('util');
 
 let OurWebSocket;
 if (typeof BROWSER_RUNTIME == "undefined" || !BROWSER_RUNTIME) {
@@ -46,7 +47,7 @@ exports._onWsConnect = ws => fn => () => {
 exports._onWsError = ws => fn => () => {
   const listener = function (event) {
     console.log("Patched _onWsError call");
-    console.log(JSON.stringify(event));
+    console.log(util.inspect(event));
     fn(event.toString())();
   };
   ws.addEventListener("error", listener);
