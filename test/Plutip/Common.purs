@@ -13,6 +13,7 @@ import Ctl.Internal.Wallet.Key (PrivateStakeKey)
 import Data.Log.Level (LogLevel(Trace))
 import Data.Maybe (Maybe(Just, Nothing), fromJust)
 import Data.Newtype (wrap)
+import Data.Time.Duration (Seconds(Seconds))
 import Data.UInt (fromInt) as UInt
 import Partial.Unsafe (unsafePartial)
 
@@ -49,6 +50,10 @@ config =
       }
   , suppressLogs: true
   , customLogger: Nothing
+  , clusterConfig:
+      { slotLength: Seconds 0.1
+      , epochSize: UInt.fromInt 30
+      }
   , hooks: emptyHooks
   }
 
