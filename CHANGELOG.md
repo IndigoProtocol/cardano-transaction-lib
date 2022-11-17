@@ -64,6 +64,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
   - `Contract.Staking.getValidatorHashDelegationsAndRewards`
 - `Contract.Test.Plutip.testPlutipContracts` to run multiple Mote Plutip tests on the same Plutip cluster, saving on cluster startup time. ([#1154](https://github.com/Plutonomicon/cardano-transaction-lib/pull/1154)).
 - `EncodeAeson` and `DecodeAeson` instances for `TransactionInput`, `TransactionOutput`/`TransactionOutputWithRefScript` and `PaymentPubKeyHash`([#1138](https://github.com/Plutonomicon/cardano-transaction-lib/pull/1138))
+- `mustSendChangeToAddress` balancer constraint, allowing to explicitly set the address to send all generated change to ([#1243](https://github.com/Plutonomicon/cardano-transaction-lib/pull/1243))
+- `mustUseUtxosAtAddress` and `mustUseUtxosAtAddresses` balancer constraints, allowing to specify addresses that should be treated like utxos sources during balancing ([#1243](https://github.com/Plutonomicon/cardano-transaction-lib/pull/1243))
 
 ### Changed
 
@@ -85,6 +87,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - Forbid minting zero tokens. ([#1156](https://github.com/Plutonomicon/cardano-transaction-lib/issues/1156))
 - Modified functions `getWalletAddress`, `ownPubKeyHash`, `ownStakePubKeyHash`, `getWalletAddressWithNetworkTag` and `ownPaymentPubKeyHash` to return `Contract r (Array Adress)`.  ([#1045](https://github.com/Plutonomicon/cardano-transaction-lib/issues/1045))
 - `pubKeyHashAddress` and `scriptHashAddress` now both accept an optional `Credential` that corresponds to the staking component of the address ([#1060](https://github.com/Plutonomicon/cardano-transaction-lib/issues/1060))
+- `utxosAt` and `getUtxo` now use Kupo internally, `utxosAt` returns `UtxoMap` without `Maybe` context. The users will need to set `kupoConfig` in `ConfigParams`. ([#1185](https://github.com/Plutonomicon/cardano-transaction-lib/pull/1185))
+- `Interval` type is redesigned to restrain some finite intervals to be expressed in the system ([#1041](https://github.com/Plutonomicon/cardano-transaction-lib/issues/1041))
 
 ### Removed
 - `balanceAndSignTxE`, `balanceAndSignTx`, `balanceAndSignTxs`, `balanceTxWithAddress`, `balanceTxsWithAddress`, `withBalancedAndSignedTx` and `withBalancedAndSignedTxs` from `Contract.Transaction` ([#1053](https://github.com/Plutonomicon/cardano-transaction-lib/pull/1053))
@@ -95,6 +99,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - `ScriptHash` type from the `Contract` interface (use `ValidatorHash`) ([#1060](https://github.com/Plutonomicon/cardano-transaction-lib/issues/1060))
 - `Contract.Address` re-exports from `Contract.Scripts` ([#1060](https://github.com/Plutonomicon/cardano-transaction-lib/issues/1060))
 - `Contract.Address.ownPubKeyHash` and `ownPubKeyHashes` - these are not needed, use `ownPaymentPubKeyHash` / `ownPaymentPubKeyHashes` ([#1211](https://github.com/Plutonomicon/cardano-transaction-lib/pull/1211))
+- `mustBalanceTxWithAddress` and `mustBalanceTxWithAddresses` balancer constraints - use a combination of `mustUseUtxosAtAddresses` and `mustSendChangeToAddress` to get the same behaviour ([#1243](https://github.com/Plutonomicon/cardano-transaction-lib/pull/1243))
 
 ### Fixed
 
@@ -103,6 +108,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 - Absence of `serializeData` in Plutip ([#1078](https://github.com/Plutonomicon/cardano-transaction-lib/issues/1078))
 - Fix excessive reconnection attempts after `Contract` runtime finalization ([#965](https://github.com/Plutonomicon/cardano-transaction-lib/pull/965))
 - Fix wallet extension error terminating the whole test suite ([#1209](https://github.com/Plutonomicon/cardano-transaction-lib/issues/1209))
+- Now we can process multiple time constraints ([#1124](https://github.com/Plutonomicon/cardano-transaction-lib/issues/1124))
 
 ## [2.0.0] - 2022-09-12
 
