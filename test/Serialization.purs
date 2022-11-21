@@ -2,6 +2,7 @@ module Test.Ctl.Serialization (suite) where
 
 import Prelude
 
+import Ctl.Internal.Types.ByteArray (hexToByteArray)
 import Ctl.Internal.Cardano.Types.Transaction
   ( PublicKey
   , Transaction
@@ -114,6 +115,12 @@ suite = do
               datum
             let bytes = toBytes (asOneOf datum')
             byteArrayToHex bytes `shouldEqual` "00"
+      test "PlutusData #7 - List" $ do
+        let
+          datum = convertPlutusData $ PD.List
+            [ PD.Integer $ BigInt.fromInt 1 ]
+          bytes = toBytes <<< asOneOf <$> datum
+        bytes `shouldEqual` (hexToByteArray "8101")
       test "TransactionOutput serialization" $ liftEffect do
         txo <- convertTxOutput txOutputFixture1
         let bytes = toBytes (asOneOf txo)

@@ -45,35 +45,35 @@ main = launchAff_ do
 
 testPlan :: TestPlanM (Aff Unit) Unit
 testPlan = do
-  Ipv6.suite
-  NativeScript.suite
-  Base64.suite
-  ByteArray.suite
-  Cip25.suite
-  Cip30SignData.suite
-  Data.suite
-  Deserialization.suite
-  Equipartition.suite
-  Hashing.suite
-  Parser.suite
-  Plutus.Conversion.Address.suite
-  Plutus.Conversion.Value.suite
-  Plutus.Time.suite
+  -- Ipv6.suite
+  -- NativeScript.suite
+  -- Base64.suite
+  -- ByteArray.suite
+  -- Cip25.suite
+  -- Cip30SignData.suite
+  -- Data.suite
+  -- Deserialization.suite
+  -- Equipartition.suite
+  -- Hashing.suite
+  -- Parser.suite
+  -- Plutus.Conversion.Address.suite
+  -- Plutus.Conversion.Value.suite
+  -- Plutus.Time.suite
   Serialization.suite
   Serialization.Address.suite
   Serialization.Hash.suite
-  Transaction.suite
-  TxOutput.suite
-  UsedTxOuts.suite
-  OgmiosDatumCache.suite
-  Ogmios.Address.suite
-  Ogmios.Aeson.suite
-  Ogmios.EvaluateTx.suite
-  ProtocolParams.suite
-  Types.TokenName.suite
-  Types.Transaction.suite
-  flip mapTest Types.Interval.suite \f -> liftEffect $ join $
-    f <$> Types.Interval.eraSummariesFixture
-      <*> Types.Interval.systemStartFixture
-  E2E.Route.suite
-  MustSpendTotal.suite
+  -- Transaction.suite
+  -- TxOutput.suite
+  -- UsedTxOuts.suite
+  -- OgmiosDatumCache.suite
+  -- Ogmios.Address.suite
+  -- Ogmios.Aeson.suite
+  -- Ogmios.EvaluateTx.suite
+  -- ProtocolParams.suite
+  -- Types.TokenName.suite
+  -- Types.Transaction.suite
+  -- flip mapTest Types.Interval.suite \f -> liftEffect $ join $
+  --   f <$> Types.Interval.eraSummariesFixture
+  --     <*> Types.Interval.systemStartFixture
+  -- E2E.Route.suite
+  -- MustSpendTotal.suite
