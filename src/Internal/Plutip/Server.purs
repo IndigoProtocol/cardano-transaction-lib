@@ -12,10 +12,10 @@ module Ctl.Internal.Plutip.Server
   , stopChildProcessWithPort
   , stopPlutipCluster
   , testPlutipContracts
+  , testPlutipContracts'
   , withPlutipContractEnv
   , withWallets
-  )
-  where
+  ) where
 
 import Prelude
 
@@ -175,7 +175,7 @@ testPlutipContracts' plutipCfg (PlutipTestPlan runPlutipTestPlan) = do
   -- the main action, so we use a `Ref` to store and read the result.
   bracket
     :: forall (a :: Type) (b :: Type)
-      . Aff a
+     . Aff a
     -> Aff Unit
     -> TestPlanM (a -> Aff b) Unit
     -> TestPlanM (Aff b) Unit
@@ -239,12 +239,13 @@ newtype PlutipTestPlan = PlutipTestPlan
   )
 
 instance Semigroup PlutipTestPlan where
-  append (PlutipTestPlan runPlutipTestPlan) (PlutipTestPlan runPlutipTestPlan') = do
-    runPlutipTestPlan \distr tests -> do
-      runPlutipTestPlan'
-        \distr' tests' -> PlutipTestPlan \h -> h (distr /\ distr') do
-          mapTest (_ <<< fst) tests
-          mapTest (_ <<< snd) tests'
+  append (PlutipTestPlan runPlutipTestPlan) (PlutipTestPlan runPlutipTestPlan') =
+    do
+      runPlutipTestPlan \distr tests -> do
+        runPlutipTestPlan'
+          \distr' tests' -> PlutipTestPlan \h -> h (distr /\ distr') do
+            mapTest (_ <<< fst) tests
+            mapTest (_ <<< snd) tests'
 
 type PlutipTestPlanHandler :: Type -> Type -> Type -> Type
 type PlutipTestPlanHandler distr wallets r =
@@ -253,6 +254,7 @@ type PlutipTestPlanHandler distr wallets r =
   -> TestPlanM (wallets -> Contract () Unit) Unit
   -> r
 
+-- | Store a wallet `UtxoDistribution` and `Contract`s that depend on that wallet
 sameWallet
   :: forall (distr :: Type) (wallets :: Type)
    . UtxoDistribution distr wallets
@@ -261,6 +263,7 @@ sameWallet
   -> PlutipTestPlan
 sameWallet distr tests = PlutipTestPlan \h -> h distr tests
 
+-- | Group `PlutipTestPlans` together, so that they can be ran in the same Plutip instance
 groupPlutipTestPlans :: String -> PlutipTestPlan -> PlutipTestPlan
 groupPlutipTestPlans title (PlutipTestPlan runPlutipTestPlan) = do
   runPlutipTestPlan \distr tests -> PlutipTestPlan \h -> h distr do
@@ -501,9 +504,9 @@ startPlutipCluster cfg keysToGenerate = do
                 $ encodeAeson
                 $ ClusterStartupRequest
                     { keysToGenerate
-                     , slotLength: cfg.clusterConfig.slotLength
-                     , epochSize: cfg.clusterConfig.epochSize
-                     }
+                    , slotLength: cfg.clusterConfig.slotLength
+                    , epochSize: cfg.clusterConfig.epochSize
+                    }
             , responseFormat = Affjax.ResponseFormat.string
             , headers = [ Header.ContentType (wrap "application/json") ]
             , url = url

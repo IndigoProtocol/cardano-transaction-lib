@@ -68,9 +68,9 @@ type PlutipConfig =
   , customLogger :: Maybe (LogLevel -> Message -> Aff Unit)
   , suppressLogs :: Boolean
   , clusterConfig ::
-       { slotLength :: Seconds
-       , epochSize :: UInt
-       }
+      { slotLength :: Seconds
+      , epochSize :: UInt
+      }
   , hooks :: Hooks
   }
 
@@ -103,11 +103,11 @@ newtype ClusterStartupRequest = ClusterStartupRequest
   }
 
 instance EncodeAeson ClusterStartupRequest where
-   encodeAeson'
-     ( ClusterStartupRequest
-         { keysToGenerate, epochSize, slotLength: Seconds slotLength }
-     ) =
-     encodeAeson' { keysToGenerate, epochSize, slotLength }
+  encodeAeson'
+    ( ClusterStartupRequest
+        { keysToGenerate, epochSize, slotLength: Seconds slotLength }
+    ) =
+    encodeAeson' { keysToGenerate, epochSize, slotLength }
 
 newtype PrivateKeyResponse = PrivateKeyResponse PrivateKey
 
