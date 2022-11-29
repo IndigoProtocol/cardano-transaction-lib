@@ -1,16 +1,21 @@
 module Ctl.Internal.Plutip.Server
-  ( runPlutipContract
-  , withPlutipContractEnv
-  , startPlutipCluster
-  , stopPlutipCluster
-  , startPlutipServer
+  ( PlutipTest
+  , PlutipTestPlan
   , checkPlutipServer
-  , stopChildProcessWithPort
-  , testPlutipContracts
-  , withWallets
+  , execDistribution
+  , groupPlutipTestPlans
   , noWallet
-  , PlutipTest
-  ) where
+  , runPlutipContract
+  , sameWallet
+  , startPlutipCluster
+  , startPlutipServer
+  , stopChildProcessWithPort
+  , stopPlutipCluster
+  , testPlutipContracts
+  , withPlutipContractEnv
+  , withWallets
+  )
+  where
 
 import Prelude
 
@@ -106,7 +111,7 @@ import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Mote (bracket) as Mote
 import Mote.Description (Description(Group, Test))
-import Mote.Monad (MoteT(MoteT), mapTest)
+import Mote.Monad (MoteT(MoteT), group, mapTest)
 import Node.ChildProcess (defaultSpawnOptions)
 import Node.Path (dirname)
 import Type.Prelude (Proxy(Proxy))
@@ -150,7 +155,14 @@ testPlutipContracts
   -> TestPlanM PlutipTest Unit
   -> TestPlanM (Aff Unit) Unit
 testPlutipContracts plutipCfg tp = do
-  PlutipTestPlan runPlutipTestPlan <- lift $ execDistribution tp
+  plutipTestPlan <- lift $ execDistribution tp
+  testPlutipContracts' plutipCfg plutipTestPlan
+
+testPlutipContracts'
+  :: PlutipConfig
+  -> PlutipTestPlan
+  -> TestPlanM (Aff Unit) Unit
+testPlutipContracts' plutipCfg (PlutipTestPlan runPlutipTestPlan) = do
   runPlutipTestPlan \distr tests -> do
     cleanupRef <- liftEffect $ Ref.new mempty
     bracket (startPlutipContractEnv plutipCfg distr cleanupRef)
@@ -163,7 +175,7 @@ testPlutipContracts plutipCfg tp = do
   -- the main action, so we use a `Ref` to store and read the result.
   bracket
     :: forall (a :: Type) (b :: Type)
-     . Aff a
+      . Aff a
     -> Aff Unit
     -> TestPlanM (a -> Aff b) Unit
     -> TestPlanM (Aff b) Unit
@@ -226,12 +238,33 @@ newtype PlutipTestPlan = PlutipTestPlan
     -> r
   )
 
+instance Semigroup PlutipTestPlan where
+  append (PlutipTestPlan runPlutipTestPlan) (PlutipTestPlan runPlutipTestPlan') = do
+    runPlutipTestPlan \distr tests -> do
+      runPlutipTestPlan'
+        \distr' tests' -> PlutipTestPlan \h -> h (distr /\ distr') do
+          mapTest (_ <<< fst) tests
+          mapTest (_ <<< snd) tests'
+
 type PlutipTestPlanHandler :: Type -> Type -> Type -> Type
 type PlutipTestPlanHandler distr wallets r =
   UtxoDistribution distr wallets
   => distr
   -> TestPlanM (wallets -> Contract () Unit) Unit
   -> r
+
+sameWallet
+  :: forall (distr :: Type) (wallets :: Type)
+   . UtxoDistribution distr wallets
+  => distr
+  -> TestPlanM (wallets -> Contract () Unit) Unit
+  -> PlutipTestPlan
+sameWallet distr tests = PlutipTestPlan \h -> h distr tests
+
+groupPlutipTestPlans :: String -> PlutipTestPlan -> PlutipTestPlan
+groupPlutipTestPlans title (PlutipTestPlan runPlutipTestPlan) = do
+  runPlutipTestPlan \distr tests -> PlutipTestPlan \h -> h distr do
+    group title tests
 
 -- | Lifts the utxo distributions of each test out of Mote, into a combined
 -- | distribution. Adapts the tests to pick their distribution out of the
