@@ -6,7 +6,7 @@ module Ctl.Internal.Plutip.Server
   , groupPlutipTestPlans
   , noWallet
   , runPlutipContract
-  , sameWallet
+  , sameWallets
   , startPlutipCluster
   , startPlutipServer
   , stopChildProcessWithPort
@@ -255,13 +255,13 @@ type PlutipTestPlanHandler distr wallets r =
   -> r
 
 -- | Store a wallet `UtxoDistribution` and `Contract`s that depend on that wallet
-sameWallet
+sameWallets
   :: forall (distr :: Type) (wallets :: Type)
    . UtxoDistribution distr wallets
   => distr
   -> TestPlanM (wallets -> Contract () Unit) Unit
   -> PlutipTestPlan
-sameWallet distr tests = PlutipTestPlan \h -> h distr tests
+sameWallets distr tests = PlutipTestPlan \h -> h distr tests
 
 -- | Group `PlutipTestPlans` together, so that they can be ran in the same Plutip instance
 groupPlutipTestPlans :: String -> PlutipTestPlan -> PlutipTestPlan

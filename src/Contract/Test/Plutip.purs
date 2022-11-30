@@ -16,7 +16,7 @@ import Ctl.Internal.Plutip.Server
   , groupPlutipTestPlans
   , noWallet
   , runPlutipContract
-  , sameWallet
+  , sameWallets
   , withPlutipContractEnv
   , withWallets
   ) as X
