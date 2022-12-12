@@ -11,6 +11,7 @@ module Ctl.Internal.BalanceTx.CoinSelection
   , _leftoverUtxos
   , mkSelectionState
   , performMultiAssetSelection
+  , runRoundRobinM -- Exported for tests
   , selectedInputs
   ) where
 
