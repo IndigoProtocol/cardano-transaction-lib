@@ -38,6 +38,7 @@ module Ctl.Internal.Serialization.Types
   , NetworkId
   , Nonce
   , PlutusData
+  , PlutusDatumMap
   , PlutusList
   , PlutusMap
   , PlutusScript
@@ -123,6 +124,7 @@ foreign import data NativeScripts :: Type
 foreign import data NetworkId :: Type
 foreign import data Nonce :: Type
 foreign import data PlutusData :: Type
+foreign import data PlutusDatumMap :: Type
 foreign import data PlutusList :: Type
 foreign import data PlutusMap :: Type
 foreign import data PlutusScript :: Type
