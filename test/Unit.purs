@@ -15,6 +15,9 @@ import Test.Ctl.ApplyArgs as ApplyArgs
 import Test.Ctl.Base64 as Base64
 import Test.Ctl.ByteArray as ByteArray
 import Test.Ctl.CoinSelection as CoinSelection
+import Test.Ctl.CoinSelection.RoundRobin as RoundRobin
+import Test.Ctl.CoinSelection.SelectionState as SelectionState
+import Test.Ctl.CoinSelection.UtxoIndex as UtxoIndex
 import Test.Ctl.Data as Data
 import Test.Ctl.Data.Interval as Ctl.Data.Interval
 import Test.Ctl.Deserialization as Deserialization
@@ -91,3 +94,6 @@ testPlan = do
   E2E.Route.suite
   MustSpendTotal.suite
   CoinSelection.suite
+  UtxoIndex.suite
+  SelectionState.suite
+  RoundRobin.suite
