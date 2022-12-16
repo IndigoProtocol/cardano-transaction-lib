@@ -6,6 +6,7 @@ module Contract.AssocMap
 
 import Contract.Prelude
 
+import Aeson (class DecodeAeson, class EncodeAeson)
 import Data.Bifunctor (bimap)
 import Ctl.Internal.Plutus.Types.AssocMap
   ( Map(Map)
@@ -39,6 +40,16 @@ import Ctl.Internal.ToData
   )
 
 newtype DatumMap (k :: Type) (v :: Type) = DatumMap (AssocMap.Map k v)
+
+derive instance Generic (DatumMap k v) _
+derive instance Newtype (DatumMap k v) _
+derive newtype instance (Eq k, Eq v) => Eq (DatumMap k v)
+derive newtype instance (Ord k, Ord v) => Ord (DatumMap k v)
+derive newtype instance (EncodeAeson k, EncodeAeson v) => EncodeAeson (DatumMap k v)
+derive newtype instance (DecodeAeson k, DecodeAeson v) => DecodeAeson (DatumMap k v)
+
+instance (Show k, Show v) => Show (DatumMap k v) where
+  show = genericShow
 
 instance (ToData k, ToData v) => ToData (DatumMap k v) where
   toData (DatumMap (AssocMap.Map xs)) = PlutusData.DatumMap (bimap toData toData <$> xs)

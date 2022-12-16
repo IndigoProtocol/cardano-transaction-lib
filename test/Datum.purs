@@ -1,18 +1,17 @@
-module Test.Ctl.Datum where
+module Test.Ctl.Datum
+  ( main
+  )
+  where
 
 import Contract.Prelude
 
 import Contract.AssocMap (DatumMap(DatumMap), Map(Map))
-import Ctl.Internal.Deserialization.FromBytes (fromBytes)
-import Ctl.Internal.Serialization (serializeData, toBytes)
-import Ctl.Internal.Serialization.PlutusData (convertPlutusData)
+import Ctl.Internal.FromData (fromData)
+import Ctl.Internal.Serialization (serializeData)
 import Ctl.Internal.ToData (toData)
+import Ctl.Internal.Types.CborBytes (CborBytes, hexToCborBytesUnsafe)
 import Data.BigInt (BigInt, fromInt)
-import Data.Newtype (unwrap)
-import Effect.Console (logShow)
-import Test.Ctl.Utils (errMaybe)
 import Test.Spec.Assertions (shouldEqual)
-import Untagged.Union (asOneOf)
 
 datum :: DatumMap BigInt String
 datum = DatumMap $ Map $
@@ -22,10 +21,10 @@ datum = DatumMap $ Map $
   , (fromInt 3 /\ "c")
   ]
 
+datumCBOR ∷ CborBytes
+datumCBOR = hexToCborBytesUnsafe "a4024162044164014161034163"
+
 main :: Effect Unit
 main = do
-  -- let pd = convertPlutusData $ toData datum
-  -- bytes <- errMaybe "Failed serialization" $ (toBytes <<< asOneOf) <$> pd
-  -- let res = fromBytes bytes
-  -- res `shouldEqual` pd
-  logShow $ serializeData datum
+   Just datumCBOR `shouldEqual` serializeData datum
+   Just datum `shouldEqual` (fromData $ toData datum)
