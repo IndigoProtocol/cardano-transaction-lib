@@ -19,6 +19,7 @@ import Ctl.Internal.Serialization.Types
   ( BigInt
   , ConstrPlutusData
   , PlutusData
+  , PlutusDatumMap
   , PlutusList
   , PlutusMap
   )
@@ -27,7 +28,7 @@ import Ctl.Internal.Types.BigNum (toBigInt) as BigNum
 import Ctl.Internal.Types.ByteArray (ByteArray)
 import Ctl.Internal.Types.CborBytes (CborBytes)
 import Ctl.Internal.Types.PlutusData
-  ( PlutusData(Constr, Map, List, Integer, Bytes)
+  ( PlutusData(Constr, DatumMap, Map, List, Integer, Bytes)
   ) as T
 import Data.Maybe (Maybe)
 import Data.Newtype (unwrap)
@@ -38,6 +39,7 @@ import Data.Tuple.Nested (type (/\), (/\))
 convertPlutusData :: PlutusData -> Maybe T.PlutusData
 convertPlutusData pd =
   convertPlutusConstr pd
+    <|> convertPlutusDatumMap pd
     <|> convertPlutusMap pd
     <|> convertPlutusList pd
     <|> convertPlutusInteger pd
@@ -62,6 +64,16 @@ convertPlutusMap pd = do
         pure (k' /\ v')
   pure $ T.Map entries
 
+convertPlutusDatumMap :: PlutusData -> Maybe T.PlutusData
+convertPlutusDatumMap pd = do
+  entries <- _PlutusData_datumMap maybeFfiHelper pd >>=
+    _unpackPlutusDatumMap containerHelper Tuple >>> traverse
+      \(k /\ v) -> do
+        k' <- convertPlutusData k
+        v' <- convertPlutusData v
+        pure (k' /\ v')
+  pure $ T.DatumMap entries
+
 convertPlutusList :: PlutusData -> Maybe T.PlutusData
 convertPlutusList pd = T.List <$> do
   _PlutusData_list maybeFfiHelper pd >>=
@@ -84,6 +96,9 @@ foreign import _PlutusData_constr
 foreign import _PlutusData_map
   :: MaybeFfiHelper -> PlutusData -> Maybe PlutusMap
 
+foreign import _PlutusData_datumMap
+  :: MaybeFfiHelper -> PlutusData -> Maybe PlutusDatumMap
+
 foreign import _PlutusData_list
   :: MaybeFfiHelper -> PlutusData -> Maybe PlutusList
 
@@ -102,4 +117,9 @@ foreign import _unpackPlutusMap
   :: ContainerHelper
   -> (forall a b. a -> b -> Tuple a b)
   -> PlutusMap
+  -> Array (PlutusData /\ PlutusData)
+foreign import _unpackPlutusDatumMap
+  :: ContainerHelper
+  -> (forall a b. a -> b -> Tuple a b)
+  -> PlutusDatumMap
   -> Array (PlutusData /\ PlutusData)

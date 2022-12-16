@@ -23,7 +23,7 @@ import Prelude
 import Aeson (class DecodeAeson, class EncodeAeson)
 import Ctl.Internal.FromData (class FromData, fromData)
 import Ctl.Internal.ToData (class ToData, toData)
-import Ctl.Internal.Types.PlutusData (PlutusData(DatumMap, Map)) as PD
+import Ctl.Internal.Types.PlutusData (PlutusData(Map)) as PD
 import Data.Array (any, deleteAt, filter, findIndex, mapMaybe, null, singleton) as Array
 import Data.Array ((:))
 import Data.Bifunctor (bimap)
@@ -73,13 +73,8 @@ derive newtype instance (DecodeAeson k, DecodeAeson v) => DecodeAeson (Map k v)
 instance (Show k, Show v) => Show (Map k v) where
   show = genericShow
 
-type DatumMap = Map
-
 instance (ToData k, ToData v) => ToData (Map k v) where
   toData (Map xs) = PD.Map (bimap toData toData <$> xs)
-else
-instance (ToData k, ToData v) => ToData (DatumMap k v) where
-  toData (Map xs) = PD.DatumMap (bimap toData toData <$> xs)
 
 instance (FromData k, FromData v) => FromData (Map k v) where
   fromData (PD.Map mp) = do

@@ -2,9 +2,9 @@
 
 let lib;
 if (typeof BROWSER_RUNTIME != "undefined" && BROWSER_RUNTIME) {
-  lib = require("@emurgo/cardano-serialization-lib-browser");
+  lib = require("@mitchycola/cardano-serialization-lib-browser");
 } else {
-  lib = require("@emurgo/cardano-serialization-lib-nodejs");
+  lib = require("@mitchycola/cardano-serialization-lib-nodejs");
 }
 
 const fromBytes = name => helper => bytes => {
@@ -19,6 +19,7 @@ exports._fromBytesDataHash = fromBytes("DataHash");
 exports._fromBytesTransaction = fromBytes("Transaction");
 exports._fromBytesTransactionHash = fromBytes("TransactionHash");
 exports._fromBytesPlutusData = fromBytes("PlutusData");
+exports._fromBytesPlutusDatumMap = fromBytes("PlutusDatumMap");
 exports._fromBytesTransactionUnspentOutput = fromBytes(
   "TransactionUnspentOutput"
 );

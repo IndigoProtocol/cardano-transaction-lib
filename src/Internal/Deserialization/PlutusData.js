@@ -6,6 +6,7 @@ const plutusDataAs = what => helper => data => {
 };
 
 exports._PlutusData_constr = plutusDataAs("constr_plutus_data");
+exports._PlutusData_datumMap = plutusDataAs("datum_map");
 exports._PlutusData_map = plutusDataAs("map");
 exports._PlutusData_list = plutusDataAs("list");
 exports._PlutusData_integer = plutusDataAs("integer");
@@ -21,6 +22,17 @@ exports._unpackPlutusMap = containerHelper => tuple => plutusMap => {
     // Assuming that `PlutusMap.get()` never fails on elements from result of
     // its `.keys()` call.
     res.push(tuple(key)(plutusMap.get(key)));
+  }
+  return res;
+};
+
+exports._unpackPlutusDatumMap = containerHelper => tuple => plutusDatumMap => {
+  const keys = containerHelper.unpack(plutusDatumMap.keys());
+  const res = [];
+  for (let key of keys) {
+    // Assuming that `PlutusMap.get()` never fails on elements from result of
+    // its `.keys()` call.
+    res.push(tuple(key)(plutusDatumMap.get(key)));
   }
   return res;
 };
