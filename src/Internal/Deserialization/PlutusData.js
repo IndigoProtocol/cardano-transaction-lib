@@ -6,7 +6,7 @@ const plutusDataAs = what => helper => data => {
 };
 
 exports._PlutusData_constr = plutusDataAs("constr_plutus_data");
-exports._PlutusData_datumMap = plutusDataAs("datum_map");
+exports._PlutusData_originalBytes = plutusDataAs("original_bytes");
 exports._PlutusData_map = plutusDataAs("map");
 exports._PlutusData_list = plutusDataAs("list");
 exports._PlutusData_integer = plutusDataAs("integer");

@@ -2,8 +2,7 @@ module Ctl.Internal.Serialization.PlutusData
   ( convertPlutusData
   , convertPlutusDatumMap
   , packPlutusList
-  )
-  where
+  ) where
 
 import Prelude
 
@@ -62,13 +61,15 @@ convertPlutusMap mp = do
     pure $ k' /\ v'
   pure $ _mkPlutusData_map $ _packMap fst snd entries
 
-convertPlutusDatumMap :: Array (T.PlutusData /\ T.PlutusData) -> Maybe PlutusData
+convertPlutusDatumMap
+  :: Array (T.PlutusData /\ T.PlutusData) -> Maybe PlutusData
 convertPlutusDatumMap mp = do
   entries <- for mp \(k /\ v) -> do
     k' <- convertPlutusData k
     v' <- convertPlutusData v
     pure $ k' /\ v'
-  pure $ _mkPlutusData_datumMap $ toBytes $ asOneOf $ _packDatumMap fst snd entries
+  pure $ _mkPlutusData_datumMap $ toBytes $ asOneOf $ _packDatumMap fst snd
+    entries
 
 convertPlutusInteger :: BigInt.BigInt -> Maybe PlutusData
 convertPlutusInteger n =

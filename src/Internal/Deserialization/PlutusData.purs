@@ -15,6 +15,8 @@ import Ctl.Internal.FfiHelpers
   , maybeFfiHelper
   )
 import Ctl.Internal.FromData (class FromData, fromData)
+import Ctl.Internal.Serialization.PlutusData (convertPlutusData) as S
+import Ctl.Internal.Serialization.ToBytes (toBytes)
 import Ctl.Internal.Serialization.Types
   ( BigInt
   , ConstrPlutusData
@@ -30,17 +32,17 @@ import Ctl.Internal.Types.CborBytes (CborBytes)
 import Ctl.Internal.Types.PlutusData
   ( PlutusData(Constr, DatumMap, Map, List, Integer, Bytes)
   ) as T
-import Data.Maybe (Maybe)
+import Data.Maybe (Maybe(Just, Nothing))
 import Data.Newtype (unwrap)
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple))
 import Data.Tuple.Nested (type (/\), (/\))
+import Untagged.Union (asOneOf)
 
 convertPlutusData :: PlutusData -> Maybe T.PlutusData
 convertPlutusData pd =
   convertPlutusConstr pd
-    <|> convertPlutusDatumMap pd
-    <|> convertPlutusMap pd
+    <|> convertMap pd
     <|> convertPlutusList pd
     <|> convertPlutusInteger pd
     <|> convertPlutusBytes pd
@@ -54,6 +56,14 @@ convertPlutusConstr pd = do
   alt <- BigNum.toBigInt $ _ConstrPlutusData_alternative constr
   pure $ T.Constr alt data'
 
+convertMap :: PlutusData -> Maybe T.PlutusData
+convertMap pd = do
+  og_bytes <- getOriginalBytes pd
+  pmap <- convertPlutusMap pd
+  bytes <- (toBytes <<< asOneOf) <$> (S.convertPlutusData pmap)
+  if bytes == og_bytes then pure $ pmap
+  else convertDatumMap og_bytes
+
 convertPlutusMap :: PlutusData -> Maybe T.PlutusData
 convertPlutusMap pd = do
   entries <- _PlutusData_map maybeFfiHelper pd >>=
@@ -64,14 +74,15 @@ convertPlutusMap pd = do
         pure (k' /\ v')
   pure $ T.Map entries
 
-convertPlutusDatumMap :: PlutusData -> Maybe T.PlutusData
-convertPlutusDatumMap pd = do
-  entries <- _PlutusData_datumMap maybeFfiHelper pd >>=
-    _unpackPlutusDatumMap containerHelper Tuple >>> traverse
-      \(k /\ v) -> do
-        k' <- convertPlutusData k
-        v' <- convertPlutusData v
-        pure (k' /\ v')
+convertDatumMap :: ByteArray -> Maybe T.PlutusData
+convertDatumMap bytes = do
+  entries <-
+    (fromBytes bytes :: Maybe PlutusDatumMap) >>=
+      _unpackPlutusDatumMap containerHelper Tuple >>> traverse
+        \(k /\ v) -> do
+          k' <- convertPlutusData k
+          v' <- convertPlutusData v
+          pure (k' /\ v')
   pure $ T.DatumMap entries
 
 convertPlutusList :: PlutusData -> Maybe T.PlutusData
@@ -90,14 +101,14 @@ convertPlutusBytes pd = T.Bytes <$> _PlutusData_bytes maybeFfiHelper pd
 deserializeData :: forall (a :: Type). FromData a => CborBytes -> Maybe a
 deserializeData = (fromData <=< convertPlutusData <=< fromBytes) <<< unwrap
 
+getOriginalBytes :: PlutusData -> Maybe ByteArray
+getOriginalBytes = _PlutusData_originalBytes maybeFfiHelper
+
 foreign import _PlutusData_constr
   :: MaybeFfiHelper -> PlutusData -> Maybe ConstrPlutusData
 
 foreign import _PlutusData_map
   :: MaybeFfiHelper -> PlutusData -> Maybe PlutusMap
-
-foreign import _PlutusData_datumMap
-  :: MaybeFfiHelper -> PlutusData -> Maybe PlutusDatumMap
 
 foreign import _PlutusData_list
   :: MaybeFfiHelper -> PlutusData -> Maybe PlutusList
@@ -118,8 +129,12 @@ foreign import _unpackPlutusMap
   -> (forall a b. a -> b -> Tuple a b)
   -> PlutusMap
   -> Array (PlutusData /\ PlutusData)
+
 foreign import _unpackPlutusDatumMap
   :: ContainerHelper
   -> (forall a b. a -> b -> Tuple a b)
   -> PlutusDatumMap
   -> Array (PlutusData /\ PlutusData)
+
+foreign import _PlutusData_originalBytes
+  :: MaybeFfiHelper -> PlutusData -> Maybe ByteArray

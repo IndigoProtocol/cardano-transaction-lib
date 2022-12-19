@@ -18,6 +18,7 @@ import Ctl.Internal.Serialization.Types
   , Mint
   , NativeScript
   , PlutusData
+  , PlutusDatumMap
   , PublicKey
   , Transaction
   , TransactionHash
@@ -50,6 +51,9 @@ instance FromBytes TransactionHash where
 
 instance FromBytes PlutusData where
   fromBytes' = _fromBytesPlutusData eh
+
+instance FromBytes PlutusDatumMap where
+  fromBytes' = _fromBytesPlutusDatumMap eh
 
 instance FromBytes TransactionUnspentOutput where
   fromBytes' = _fromBytesTransactionUnspentOutput eh
@@ -117,6 +121,9 @@ foreign import _fromBytesTransactionHash
 
 foreign import _fromBytesPlutusData
   :: forall (r :: Row Type). ErrorFfiHelper r -> ByteArray -> E r PlutusData
+
+foreign import _fromBytesPlutusDatumMap
+  :: forall (r :: Row Type). ErrorFfiHelper r -> ByteArray -> E r PlutusDatumMap
 
 foreign import _fromBytesTransaction
   :: forall (r :: Row Type). ErrorFfiHelper r -> ByteArray -> E r Transaction
