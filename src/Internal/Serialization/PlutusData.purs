@@ -60,14 +60,13 @@ convertPlutusMap mp =
     _mkPlutusData_map $ _packMap fst snd entries
 
 convertPlutusDatumMap
-  :: Array (T.PlutusData /\ T.PlutusData) -> Maybe PlutusData
-convertPlutusDatumMap mp = do
-  entries <- for mp \(k /\ v) -> do
-    k' <- convertPlutusData k
-    v' <- convertPlutusData v
-    pure $ k' /\ v'
-  pure $ _mkPlutusData_datumMap $ toBytes $ asOneOf $ _packDatumMap fst snd
-    entries
+  :: Array (T.PlutusData /\ T.PlutusData) -> PlutusData
+convertPlutusDatumMap mp =
+  let
+    entries :: Array (PlutusData /\ PlutusData)
+    entries = mp <#> \(k /\ v) -> (convertPlutusData k /\ convertPlutusData v)
+  in
+    _mkPlutusData_datumMap $ toBytes $ asOneOf $ _packDatumMap fst snd entries
 
 convertPlutusInteger :: BigInt.BigInt -> PlutusData
 convertPlutusInteger n =

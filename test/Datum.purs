@@ -39,6 +39,6 @@ suite = do
     test "To Data <=> From Data" do
       Just datum `shouldEqual` (fromData $ toData datum)
     test "Serialize Datum" do
-      Just datumCBOR `shouldEqual` serializeData datum
+      datumCBOR `shouldEqual` serializeData datum
     test "Deserialize Datum CBOR" do
       Just datum `shouldEqual` deserializeData datumCBOR

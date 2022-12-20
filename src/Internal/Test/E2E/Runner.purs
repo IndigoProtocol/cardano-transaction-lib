@@ -223,10 +223,6 @@ buildPlutipConfig options =
       }
   , suppressLogs: true
   , customLogger: Just \_ _ -> pure unit
-  , clusterConfig:
-      { slotLength: Seconds 0.1
-      , epochSize: UInt.fromInt 30
-      }
   , hooks: emptyHooks
   , clusterConfig: defaultClusterConfig
   }

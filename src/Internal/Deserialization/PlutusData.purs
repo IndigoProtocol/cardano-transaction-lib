@@ -78,12 +78,9 @@ convertPlutusMap pd = do
 convertDatumMap :: ByteArray -> Maybe T.PlutusData
 convertDatumMap bytes = do
   entries <-
-    (fromBytes bytes :: Maybe PlutusDatumMap) >>=
-      _unpackPlutusDatumMap containerHelper Tuple >>> traverse
-        \(k /\ v) -> do
-          k' <- convertPlutusData k
-          v' <- convertPlutusData v
-          pure (k' /\ v')
+    (fromBytes bytes :: Maybe PlutusDatumMap) <#>
+      _unpackPlutusDatumMap containerHelper Tuple >>> map
+      \(k /\ v) -> (convertPlutusData k /\ convertPlutusData v)
   pure $ T.Map entries
 
 convertPlutusList :: PlutusData -> Maybe T.PlutusData
