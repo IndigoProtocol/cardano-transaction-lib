@@ -694,8 +694,11 @@ suite = do
             rewardsAfter `shouldSatisfy` \after -> after < rewardsBefore
   where
   config = Common.config
-    { clusterConfig = 
-      { slotLength: Seconds 0.05
-      , epochSize: UInt.fromInt 30
-      }
+    { clusterConfig =
+        { slotLength: Just $ Seconds 0.05
+        , maxTxSize: Nothing
+        , increasedExUnits: Nothing
+        , epochSize: Just $ UInt.fromInt 30
+        , noCollateral: false
+        }
     }

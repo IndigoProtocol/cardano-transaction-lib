@@ -6,6 +6,7 @@ module Ctl.Internal.Plutip.Types
   , InitialUTxODistribution
   , InitialUTxOsWithStakeKey(InitialUTxOsWithStakeKey)
   , PlutipConfig
+  , ClusterConfig
   , PostgresConfig
   , ClusterStartupRequest(ClusterStartupRequest)
   , PrivateKeyResponse(PrivateKeyResponse)
@@ -21,6 +22,7 @@ module Ctl.Internal.Plutip.Types
   , StopClusterRequest(StopClusterRequest)
   , StopClusterResponse(StopClusterSuccess, StopClusterFailure)
   , UtxoAmount
+  , defaultClusterConfig
   ) where
 
 import Prelude
@@ -47,11 +49,11 @@ import Data.Either (Either(Left), note)
 import Data.Generic.Rep (class Generic)
 import Data.Log.Level (LogLevel)
 import Data.Log.Message (Message)
-import Data.Maybe (Maybe)
-import Data.Newtype (class Newtype)
+import Data.Maybe (Maybe(Nothing))
+import Data.Newtype (class Newtype, unwrap)
 import Data.Show.Generic (genericShow)
 import Data.String as String
-import Data.Time.Duration (Seconds(Seconds))
+import Data.Time.Duration (Seconds)
 import Data.UInt (UInt)
 import Effect.Aff (Aff)
 import Partial.Unsafe (unsafePartial)
@@ -68,11 +70,27 @@ type PlutipConfig =
   , postgresConfig :: PostgresConfig
   , customLogger :: Maybe (LogLevel -> Message -> Aff Unit)
   , suppressLogs :: Boolean
-  , clusterConfig ::
-      { slotLength :: Seconds
-      , epochSize :: UInt
-      }
   , hooks :: Hooks
+  , clusterConfig :: ClusterConfig
+  }
+
+type ClusterConfig =
+  { slotLength :: Maybe Seconds
+  -- Adjust the max transaction size. Useful for debugging with traces
+  , maxTxSize :: Maybe UInt
+  -- Factor by which to increase the Max ex-units of a cluster
+  , increasedExUnits :: Maybe UInt
+  , epochSize :: Maybe UInt
+  , noCollateral :: Boolean
+  }
+
+defaultClusterConfig :: ClusterConfig
+defaultClusterConfig =
+  { slotLength: Nothing
+  , maxTxSize: Nothing
+  , increasedExUnits: Nothing
+  , epochSize: Nothing
+  , noCollateral: false
   }
 
 type PostgresConfig =
@@ -97,21 +115,39 @@ data InitialUTxOsWithStakeKey =
 
 type InitialUTxODistribution = Array InitialUTxOs
 
-newtype ClusterStartupRequest = ClusterStartupRequest
-  { keysToGenerate :: InitialUTxODistribution
-  , epochSize :: UInt
-  , slotLength :: Seconds
-  }
+newtype ClusterStartupRequest =
+  ClusterStartupRequest
+    { keysToGenerate :: InitialUTxODistribution
+    , epochSize :: Maybe UInt
+    , slotLength :: Maybe Seconds
+    , maxTxSize :: Maybe UInt
+    , increasedExUnits :: Maybe UInt
+    , noCollateral :: Boolean
+    }
 
 instance EncodeAeson ClusterStartupRequest where
   encodeAeson
     ( ClusterStartupRequest
-        { keysToGenerate, epochSize, slotLength: Seconds slotLength }
-    ) = encodeAeson
-    { keysToGenerate
-    , epochSize
-    , slotLength: unsafePartial partialFiniteNumber slotLength
-    }
+        { keysToGenerate
+        , epochSize
+        , slotLength
+        , maxTxSize
+        , increasedExUnits
+        , noCollateral
+        }
+    ) =
+
+    let
+      sl = (unsafePartial partialFiniteNumber <<< unwrap) <$> slotLength
+    in
+      encodeAeson
+        { keysToGenerate
+        , epochSize
+        , slotLength: sl
+        , maxTxSize
+        , increasedExUnits
+        , noCollateral
+        }
 
 newtype PrivateKeyResponse = PrivateKeyResponse PrivateKey
 

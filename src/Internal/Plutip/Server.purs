@@ -498,11 +498,7 @@ startPlutipCluster
   -> InitialUTxODistribution
   -> Aff (PrivatePaymentKey /\ ClusterStartupParameters)
 startPlutipCluster cfg keysToGenerate = do
-  let
-    url = mkServerEndpointUrl cfg "start"
-    -- TODO epoch size cannot currently be changed due to
-    -- https://github.com/mlabs-haskell/plutip/issues/149
-    epochSize = UInt.fromInt 80
+  let url = mkServerEndpointUrl cfg "start"
   res <- do
     response <- liftAff
       ( Affjax.request
@@ -514,7 +510,12 @@ startPlutipCluster cfg keysToGenerate = do
                 $ ClusterStartupRequest
                     { keysToGenerate
                     , slotLength: cfg.clusterConfig.slotLength
+                    -- TODO epoch size cannot currently be changed due to
+                    -- https://github.com/mlabs-haskell/plutip/issues/149
                     , epochSize: cfg.clusterConfig.epochSize
+                    , maxTxSize: cfg.clusterConfig.maxTxSize
+                    , increasedExUnits: cfg.clusterConfig.increasedExUnits
+                    , noCollateral: cfg.clusterConfig.noCollateral
                     }
             , responseFormat = Affjax.ResponseFormat.string
             , headers = [ Header.ContentType (wrap "application/json") ]

@@ -27,12 +27,14 @@ import Ctl.Internal.Plutip.Server
   , testPlutipContracts'
   ) as Server
 import Ctl.Internal.Plutip.Types
-  ( InitialUTxODistribution
+  ( ClusterConfig
+  , InitialUTxODistribution
   , InitialUTxOs
   , InitialUTxOsWithStakeKey
   , PlutipConfig
   , PostgresConfig
   , UtxoAmount
+  , defaultClusterConfig
   ) as X
 import Ctl.Internal.Plutip.Types (PlutipConfig)
 import Ctl.Internal.Plutip.UtxoDistribution
