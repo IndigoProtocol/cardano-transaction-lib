@@ -1,15 +1,20 @@
 module Ctl.Internal.Plutip.Server
-  ( runPlutipContract
-  , withPlutipContractEnv
-  , startPlutipCluster
-  , stopPlutipCluster
-  , startPlutipServer
+  ( PlutipTest
+  , PlutipTestPlan
   , checkPlutipServer
-  , stopChildProcessWithPort
-  , testPlutipContracts
-  , withWallets
+  , execDistribution
+  , groupPlutipTestPlans
   , noWallet
-  , PlutipTest
+  , runPlutipContract
+  , sameWallets
+  , startPlutipCluster
+  , startPlutipServer
+  , stopChildProcessWithPort
+  , stopPlutipCluster
+  , testPlutipContracts
+  , testPlutipContracts'
+  , withPlutipContractEnv
+  , withWallets
   ) where
 
 import Prelude
@@ -111,7 +116,7 @@ import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Mote (bracket) as Mote
 import Mote.Description (Description(Group, Test))
-import Mote.Monad (MoteT(MoteT), mapTest)
+import Mote.Monad (MoteT(MoteT), group, mapTest)
 import Node.ChildProcess (defaultSpawnOptions)
 import Node.FS.Sync (exists, mkdir) as FSSync
 import Node.Path (FilePath, dirname)
@@ -157,7 +162,14 @@ testPlutipContracts
   -> TestPlanM PlutipTest Unit
   -> TestPlanM (Aff Unit) Unit
 testPlutipContracts plutipCfg tp = do
-  PlutipTestPlan runPlutipTestPlan <- lift $ execDistribution tp
+  plutipTestPlan <- lift $ execDistribution tp
+  testPlutipContracts' plutipCfg plutipTestPlan
+
+testPlutipContracts'
+  :: PlutipConfig
+  -> PlutipTestPlan
+  -> TestPlanM (Aff Unit) Unit
+testPlutipContracts' plutipCfg (PlutipTestPlan runPlutipTestPlan) = do
   runPlutipTestPlan \distr tests -> do
     cleanupRef <- liftEffect $ Ref.new mempty
     bracket (startPlutipContractEnv plutipCfg distr cleanupRef)
@@ -233,12 +245,36 @@ newtype PlutipTestPlan = PlutipTestPlan
     -> r
   )
 
+instance Semigroup PlutipTestPlan where
+  append (PlutipTestPlan runPlutipTestPlan) (PlutipTestPlan runPlutipTestPlan') =
+    do
+      runPlutipTestPlan \distr tests -> do
+        runPlutipTestPlan'
+          \distr' tests' -> PlutipTestPlan \h -> h (distr /\ distr') do
+            mapTest (_ <<< fst) tests
+            mapTest (_ <<< snd) tests'
+
 type PlutipTestPlanHandler :: Type -> Type -> Type -> Type
 type PlutipTestPlanHandler distr wallets r =
   UtxoDistribution distr wallets
   => distr
   -> TestPlanM (wallets -> Contract () Unit) Unit
   -> r
+
+-- | Store a wallet `UtxoDistribution` and `Contract`s that depend on that wallet
+sameWallets
+  :: forall (distr :: Type) (wallets :: Type)
+   . UtxoDistribution distr wallets
+  => distr
+  -> TestPlanM (wallets -> Contract () Unit) Unit
+  -> PlutipTestPlan
+sameWallets distr tests = PlutipTestPlan \h -> h distr tests
+
+-- | Group `PlutipTestPlans` together, so that they can be ran in the same Plutip instance
+groupPlutipTestPlans :: String -> PlutipTestPlan -> PlutipTestPlan
+groupPlutipTestPlans title (PlutipTestPlan runPlutipTestPlan) = do
+  runPlutipTestPlan \distr tests -> PlutipTestPlan \h -> h distr do
+    group title tests
 
 -- | Lifts the utxo distributions of each test out of Mote, into a combined
 -- | distribution. Adapts the tests to pick their distribution out of the
@@ -462,11 +498,7 @@ startPlutipCluster
   -> InitialUTxODistribution
   -> Aff (PrivatePaymentKey /\ ClusterStartupParameters)
 startPlutipCluster cfg keysToGenerate = do
-  let
-    url = mkServerEndpointUrl cfg "start"
-    -- TODO epoch size cannot currently be changed due to
-    -- https://github.com/mlabs-haskell/plutip/issues/149
-    epochSize = UInt.fromInt 80
+  let url = mkServerEndpointUrl cfg "start"
   res <- do
     response <- liftAff
       ( Affjax.request
@@ -478,7 +510,12 @@ startPlutipCluster cfg keysToGenerate = do
                 $ ClusterStartupRequest
                     { keysToGenerate
                     , slotLength: cfg.clusterConfig.slotLength
-                    , epochSize
+                    -- TODO epoch size cannot currently be changed due to
+                    -- https://github.com/mlabs-haskell/plutip/issues/149
+                    , epochSize: cfg.clusterConfig.epochSize
+                    , maxTxSize: cfg.clusterConfig.maxTxSize
+                    , increasedExUnits: cfg.clusterConfig.increasedExUnits
+                    , noCollateral: cfg.clusterConfig.noCollateral
                     }
             , responseFormat = Affjax.ResponseFormat.string
             , headers = [ Header.ContentType (wrap "application/json") ]

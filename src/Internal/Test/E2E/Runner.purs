@@ -15,7 +15,10 @@ import Control.Promise (Promise, toAffE)
 import Ctl.Internal.Deserialization.Keys (privateKeyFromBytes)
 import Ctl.Internal.Helpers (liftedM, (<</>>))
 import Ctl.Internal.Plutip.Server (withPlutipContractEnv)
-import Ctl.Internal.Plutip.Types (PlutipConfig)
+import Ctl.Internal.Plutip.Types
+  ( PlutipConfig
+  , defaultClusterConfig
+  )
 import Ctl.Internal.Plutip.UtxoDistribution (withStakeKey)
 import Ctl.Internal.QueryM (ClusterSetup, emptyHooks)
 import Ctl.Internal.Test.E2E.Browser (withBrowser)
@@ -89,7 +92,7 @@ import Data.Posix.Signal (Signal(SIGINT))
 import Data.String (Pattern(Pattern))
 import Data.String (contains, null, split, toLower, toUpper, trim) as String
 import Data.String.Utils (startsWith, words) as String
-import Data.Time.Duration (Milliseconds(Milliseconds), Seconds(Seconds))
+import Data.Time.Duration (Milliseconds(Milliseconds))
 import Data.Traversable (for, for_)
 import Data.Tuple (Tuple(Tuple))
 import Data.UInt as UInt
@@ -221,8 +224,7 @@ buildPlutipConfig options =
   , suppressLogs: true
   , customLogger: Just \_ _ -> pure unit
   , hooks: emptyHooks
-  , clusterConfig:
-      { slotLength: Seconds 0.05 }
+  , clusterConfig: defaultClusterConfig
   }
 
 -- | Plutip does not generate private stake keys for us, so we make one and
