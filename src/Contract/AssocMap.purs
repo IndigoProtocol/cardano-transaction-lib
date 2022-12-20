@@ -35,7 +35,7 @@ import Ctl.Internal.ToData
   , toData
   )
 import Ctl.Internal.Types.PlutusData
-  ( PlutusData(DatumMap)
+  ( PlutusData(DatumMap, Map)
   ) as PlutusData
 import Data.Bifunctor (bimap)
 
@@ -66,6 +66,13 @@ instance (ToData k, ToData v) => ToData (DatumMap k v) where
 
 instance (FromData k, FromData v) => FromData (DatumMap k v) where
   fromData (PlutusData.DatumMap mp) = do
+    (DatumMap <<< AssocMap.Map) <$>
+      ( for mp \(k /\ v) ->
+          Tuple <$> fromData k <*> fromData v
+      )
+  -- Since deserialization will utilize `Map` instead of the ad hoc `DatumMap`,
+  -- a case for `Map` is needed.
+  fromData (PlutusData.Map mp) = do
     (DatumMap <<< AssocMap.Map) <$>
       ( for mp \(k /\ v) ->
           Tuple <$> fromData k <*> fromData v

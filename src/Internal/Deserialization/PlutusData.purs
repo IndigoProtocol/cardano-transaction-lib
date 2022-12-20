@@ -15,8 +15,6 @@ import Ctl.Internal.FfiHelpers
   , maybeFfiHelper
   )
 import Ctl.Internal.FromData (class FromData, fromData)
-import Ctl.Internal.Serialization.PlutusData (convertPlutusData) as S
-import Ctl.Internal.Serialization.ToBytes (toBytes)
 import Ctl.Internal.Serialization.Types
   ( BigInt
   , ConstrPlutusData
@@ -30,14 +28,13 @@ import Ctl.Internal.Types.BigNum (toBigInt) as BigNum
 import Ctl.Internal.Types.ByteArray (ByteArray)
 import Ctl.Internal.Types.CborBytes (CborBytes)
 import Ctl.Internal.Types.PlutusData
-  ( PlutusData(Constr, DatumMap, Map, List, Integer, Bytes)
+  ( PlutusData(Constr, Map, List, Integer, Bytes)
   ) as T
 import Data.Maybe (Maybe(Just, Nothing))
 import Data.Newtype (unwrap)
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(Tuple))
 import Data.Tuple.Nested (type (/\), (/\))
-import Untagged.Union (asOneOf)
 
 convertPlutusData :: PlutusData -> Maybe T.PlutusData
 convertPlutusData pd =
@@ -56,13 +53,18 @@ convertPlutusConstr pd = do
   alt <- BigNum.toBigInt $ _ConstrPlutusData_alternative constr
   pure $ T.Constr alt data'
 
+-- With no good way of knowing the data types that are contained in a map defore
+-- deserialization, we can assume that CSL's default map deserialization should
+-- be used, unless the original bytes of the `PlutusData` is provided to CSL.
+-- The key-value pairs should be returned unsorted by defalut, since CSL should
+-- always be storing the original bytes while deserializing `PlutusData`. The 
+-- output of `convertMap` should be `Map` instead of the ad hoc `DatumMap`,
+-- since a CBOR map is not limited to a datum.
 convertMap :: PlutusData -> Maybe T.PlutusData
 convertMap pd = do
-  og_bytes <- getOriginalBytes pd
-  pmap <- convertPlutusMap pd
-  bytes <- (toBytes <<< asOneOf) <$> (S.convertPlutusData pmap)
-  if bytes == og_bytes then pure $ pmap
-  else convertDatumMap og_bytes
+  case getOriginalBytes pd of
+    Just (bytes) -> convertDatumMap bytes
+    Nothing -> convertPlutusMap pd
 
 convertPlutusMap :: PlutusData -> Maybe T.PlutusData
 convertPlutusMap pd = do
@@ -83,7 +85,7 @@ convertDatumMap bytes = do
           k' <- convertPlutusData k
           v' <- convertPlutusData v
           pure (k' /\ v')
-  pure $ T.DatumMap entries
+  pure $ T.Map entries
 
 convertPlutusList :: PlutusData -> Maybe T.PlutusData
 convertPlutusList pd = T.List <$> do
