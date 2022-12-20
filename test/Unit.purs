@@ -2,14 +2,20 @@ module Test.Ctl.Unit (main, testPlan) where
 
 import Prelude
 
-import Ctl.Internal.Test.TestPlanM (TestPlanM, interpret)
+import Contract.Test.Mote (TestPlanM, interpretWithConfig)
+import Contract.Test.Utils (exitCode, interruptOnSignal)
+import Data.Maybe (Maybe(Just))
+import Data.Posix.Signal (Signal(SIGINT))
+import Data.Time.Duration (Milliseconds(Milliseconds))
 import Effect (Effect)
-import Effect.Aff (Aff, launchAff_)
+import Effect.Aff (Aff, cancelWith, effectCanceler, launchAff)
 import Effect.Class (liftEffect)
 import Mote.Monad (mapTest)
+import Test.Ctl.ApplyArgs as ApplyArgs
 import Test.Ctl.Base64 as Base64
 import Test.Ctl.ByteArray as ByteArray
 import Test.Ctl.Data as Data
+import Test.Ctl.Data.Interval as Ctl.Data.Interval
 import Test.Ctl.Deserialization as Deserialization
 import Test.Ctl.E2E.Route as E2E.Route
 import Test.Ctl.Equipartition as Equipartition
@@ -37,14 +43,19 @@ import Test.Ctl.Types.TokenName as Types.TokenName
 import Test.Ctl.Types.Transaction as Types.Transaction
 import Test.Ctl.UsedTxOuts as UsedTxOuts
 import Test.Ctl.Wallet.Cip30.SignData as Cip30SignData
+import Test.Spec.Runner (defaultConfig)
 
 -- Run with `spago test --main Test.Ctl.Unit`
 main :: Effect Unit
-main = launchAff_ do
-  interpret testPlan
+main = interruptOnSignal SIGINT =<< launchAff do
+  flip cancelWith (effectCanceler (exitCode 1)) do
+    interpretWithConfig
+      defaultConfig { timeout = Just $ Milliseconds 30_000.0, exit = true }
+      testPlan
 
 testPlan :: TestPlanM (Aff Unit) Unit
 testPlan = do
+  ApplyArgs.suite
   Ipv6.suite
   NativeScript.suite
   Base64.suite
@@ -72,6 +83,7 @@ testPlan = do
   ProtocolParams.suite
   Types.TokenName.suite
   Types.Transaction.suite
+  Ctl.Data.Interval.suite
   flip mapTest Types.Interval.suite \f -> liftEffect $ join $
     f <$> Types.Interval.eraSummariesFixture
       <*> Types.Interval.systemStartFixture

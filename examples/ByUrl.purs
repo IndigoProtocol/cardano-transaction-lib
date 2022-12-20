@@ -8,11 +8,13 @@ import Contract.Config
   , mainnetGeroConfig
   , mainnetLodeConfig
   , mainnetNamiConfig
+  , mainnetNuFiConfig
   , testnetEternlConfig
   , testnetFlintConfig
   , testnetGeroConfig
   , testnetLodeConfig
   , testnetNamiConfig
+  , testnetNuFiConfig
   )
 import Contract.Monad (Contract)
 import Contract.Test.E2E (E2EConfigName, E2ETestName, addLinks, route)
@@ -20,25 +22,32 @@ import Ctl.Examples.AlwaysMints as AlwaysMints
 import Ctl.Examples.AlwaysSucceeds as AlwaysSucceeds
 import Ctl.Examples.Cip30 as Cip30
 import Ctl.Examples.Datums as Datums
+import Ctl.Examples.ECDSA as ECDSA
 import Ctl.Examples.MintsMultipleTokens as MintsMultipleTokens
 import Ctl.Examples.NativeScriptMints as NativeScriptMints
 import Ctl.Examples.OneShotMinting as OneShotMinting
+import Ctl.Examples.PaysWithDatum as PaysWithDatum
 import Ctl.Examples.Pkh2Pkh as Pkh2Pkh
 import Ctl.Examples.PlutusV2.AlwaysSucceeds as AlwaysSucceedsV2
 import Ctl.Examples.PlutusV2.OneShotMinting as OneShotMintingV2
 import Ctl.Examples.PlutusV2.ReferenceInputs as ReferenceInputsV2
+import Ctl.Examples.PlutusV2.ReferenceInputsAndScripts as ReferenceInputsAndScriptsV2
+import Ctl.Examples.Schnorr as Schnorr
 import Ctl.Examples.SendsToken as SendsToken
+import Ctl.Examples.SignData as SignData
 import Ctl.Examples.SignMultiple as SignMultiple
 import Ctl.Examples.TxChaining as TxChaining
+import Ctl.Examples.Utxos as Utxos
 import Ctl.Examples.Wallet as Wallet
 import Ctl.Internal.Wallet.Cip30Mock
-  ( WalletMock(MockNami, MockGero, MockFlint, MockLode)
+  ( WalletMock(MockNami, MockGero, MockFlint, MockLode, MockNuFi)
   )
 import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(Just, Nothing))
 import Data.Tuple.Nested (type (/\), (/\))
 import Effect (Effect)
+import Test.Ctl.ApplyArgs as ApplyArgs
 
 main :: Effect Unit
 main = do
@@ -52,6 +61,7 @@ wallets = Map.fromFoldable
   , "flint" /\ testnetFlintConfig /\ Nothing
   , "eternl" /\ testnetEternlConfig /\ Nothing
   , "lode" /\ testnetLodeConfig /\ Nothing
+  , "nufi" /\ testnetNuFiConfig /\ Nothing
   , "nami-mock" /\ testnetNamiConfig /\ Just MockNami
   , "gero-mock" /\ testnetGeroConfig /\ Just MockGero
   , "flint-mock" /\ testnetFlintConfig /\ Just MockFlint
@@ -61,6 +71,7 @@ wallets = Map.fromFoldable
   , "plutip-gero-mock" /\ mainnetGeroConfig /\ Just MockGero
   , "plutip-flint-mock" /\ mainnetFlintConfig /\ Just MockFlint
   , "plutip-lode-mock" /\ mainnetLodeConfig /\ Just MockLode
+  , "plutip-nufi-mock" /\ mainnetNuFiConfig /\ Just MockNuFi
   ]
 
 examples :: Map E2ETestName (Contract () Unit)
@@ -74,10 +85,17 @@ examples = Map.fromFoldable
   , "Pkh2Pkh" /\ Pkh2Pkh.contract
   , "TxChaining" /\ TxChaining.contract
   , "SendsToken" /\ SendsToken.contract
+  , "SignData" /\ SignData.contract
   , "SignMultiple" /\ SignMultiple.contract
   , "MintsMultipleTokens" /\ MintsMultipleTokens.contract
   , "OneShotMinting" /\ OneShotMinting.contract
   , "OneShotMintingV2" /\ OneShotMintingV2.contract
   , "Cip30" /\ Cip30.contract
   , "ReferenceInputs" /\ ReferenceInputsV2.contract
+  , "ReferenceInputsAndScripts" /\ ReferenceInputsAndScriptsV2.contract
+  , "Utxos" /\ Utxos.contract
+  , "ApplyArgs" /\ ApplyArgs.contract
+  , "Schnorr" /\ Schnorr.contract
+  , "ECDSA" /\ ECDSA.contract
+  , "PaysWithDatum" /\ PaysWithDatum.contract
   ]

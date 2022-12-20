@@ -57,7 +57,6 @@ import Ctl.Examples.Helpers (mustPayToPubKeyStakeAddress) as Helpers
 import Data.Array (head)
 import Data.BigInt (BigInt)
 import Data.Lens (view)
-import Data.Map (empty) as Map
 
 newtype ContractParams = ContractParams
   { receiverPkh :: PaymentPubKeyHash
@@ -88,7 +87,7 @@ mkAssertions params@(ContractParams p) = do
     liftedM "Failed to get sender address" $ head <$> getWalletAddresses
   receiverAddress <-
     liftedM "Failed to get receiver address" (getReceiverAddress params)
-  dhash <- liftContractM "Failed to hash datum" $ datumHash $ p.datumToAttach
+  let dhash = datumHash p.datumToAttach
   pure
     $
       [ TestUtils.assertGainAtAddress' (label receiverAddress "Receiver")
@@ -163,7 +162,7 @@ contract params@(ContractParams p) = do
 
     senderAddress <- liftedM "Failed to get sender address" $ head <$>
       getWalletAddresses
-    utxos <- fromMaybe Map.empty <$> utxosAt senderAddress
+    utxos <- utxosAt senderAddress
 
     txOutputUnderTest <-
       view _output <$>

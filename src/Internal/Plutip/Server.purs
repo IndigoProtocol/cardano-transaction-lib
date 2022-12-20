@@ -35,12 +35,17 @@ import Control.Monad.Error.Class (liftEither)
 import Control.Monad.State (State, execState, modify_)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Writer (censor, execWriterT, tell)
+import Control.Parallel (parallel, sequential)
 import Ctl.Internal.Helpers ((<</>>))
 import Ctl.Internal.Plutip.PortCheck (isPortAvailable)
 import Ctl.Internal.Plutip.Spawn
   ( ManagedProcess
   , NewOutputAction(Success, NoOp)
+  , OnSignalRef
+  , cleanupOnSigint
+  , cleanupOnSigint'
   , cleanupTmpDir
+  , removeOnSignal
   , spawn
   , stop
   , waitForStop
@@ -91,7 +96,7 @@ import Data.Newtype (over, unwrap, wrap)
 import Data.String.CodeUnits as String
 import Data.String.Pattern (Pattern(Pattern))
 import Data.Traversable (foldMap, for, for_, sequence_, traverse_)
-import Data.Tuple (fst, snd)
+import Data.Tuple (Tuple(Tuple), fst, snd)
 import Data.Tuple.Nested (type (/\), (/\))
 import Data.UInt (UInt)
 import Data.UInt as UInt
@@ -113,7 +118,8 @@ import Mote (bracket) as Mote
 import Mote.Description (Description(Group, Test))
 import Mote.Monad (MoteT(MoteT), group, mapTest)
 import Node.ChildProcess (defaultSpawnOptions)
-import Node.Path (dirname)
+import Node.FS.Sync (exists, mkdir) as FSSync
+import Node.Path (FilePath, dirname)
 import Type.Prelude (Proxy(Proxy))
 
 -- | Run a single `Contract` in Plutip environment.
@@ -150,6 +156,7 @@ withPlutipContractEnv plutipCfg distr cont = do
 -- |       Namely, brackets are run for each of the following groups and tests.
 -- |       If you wish to only set up Plutip once, ensure all tests are wrapped
 -- |       in a single group.
+-- | https://github.com/Plutonomicon/cardano-transaction-lib/blob/develop/doc/plutip-testing.md#testing-with-mote
 testPlutipContracts
   :: PlutipConfig
   -> TestPlanM PlutipTest Unit
@@ -326,8 +333,8 @@ startPlutipContractEnv plutipCfg distr cleanupRef = do
   ourKey /\ response <- startPlutipCluster'
   startPostgres' response
   startOgmios' response
+  startKupo' response
   startOgmiosDatumCache' response
-  startMCtlServer'
   { env, printLogs, clearLogs } <- mkContractEnv'
   wallets <- mkWallets' env ourKey response
   pure
@@ -375,13 +382,11 @@ startPlutipContractEnv plutipCfg distr cleanupRef = do
 
   startPostgres' :: ClusterStartupParameters -> Aff Unit
   startPostgres' response =
-    bracket (startPostgresServer plutipCfg.postgresConfig)
-      (stopChildProcessWithPort plutipCfg.postgresConfig.port <<< fst)
-      \(process /\ workingDir) -> do
-        let
-          testClusterDir = (dirname <<< dirname) response.nodeConfigPath
-        liftEffect $ cleanupTmpDir process workingDir testClusterDir
-        configurePostgresServer plutipCfg.postgresConfig
+    bracket (startPostgresServer plutipCfg.postgresConfig response)
+      (stopChildProcessWithPortAndRemoveOnSignal plutipCfg.postgresConfig.port)
+      \(process /\ workingDir /\ _) -> do
+        liftEffect $ cleanupTmpDir process workingDir
+        void $ configurePostgresServer plutipCfg.postgresConfig
 
   startOgmios' :: ClusterStartupParameters -> Aff Unit
   startOgmios' response =
@@ -389,20 +394,19 @@ startPlutipContractEnv plutipCfg distr cleanupRef = do
       (stopChildProcessWithPort plutipCfg.ogmiosConfig.port)
       (const $ pure unit)
 
+  startKupo' :: ClusterStartupParameters -> Aff Unit
+  startKupo' response =
+    bracket (startKupo plutipCfg response)
+      (stopChildProcessWithPortAndRemoveOnSignal plutipCfg.kupoConfig.port)
+      \(process /\ workdir /\ _) -> do
+        liftEffect $ cleanupTmpDir process workdir
+        pure unit
+
   startOgmiosDatumCache' :: ClusterStartupParameters -> Aff Unit
   startOgmiosDatumCache' response =
     bracket (startOgmiosDatumCache plutipCfg response)
       (stopChildProcessWithPort plutipCfg.ogmiosDatumCacheConfig.port) $ const
       (pure unit)
-
-  startMCtlServer' :: Aff Unit
-  startMCtlServer' = case plutipCfg.ctlServerConfig of
-    Nothing -> pure unit
-    Just config ->
-      bracket
-        (startCtlServer config.port)
-        (stopChildProcessWithPort config.port)
-        $ const (pure unit)
 
   mkWallets'
     :: ContractEnv ()
@@ -468,9 +472,10 @@ configCheck cfg = do
     services =
       [ cfg.port /\ "plutip-server"
       , cfg.ogmiosConfig.port /\ "ogmios"
+      , cfg.kupoConfig.port /\ "kupo"
       , cfg.ogmiosDatumCacheConfig.port /\ "ogmios-datum-cache"
       , cfg.postgresConfig.port /\ "postgres"
-      ] <> foldMap (pure <<< (_ /\ "ctl-server") <<< _.port) cfg.ctlServerConfig
+      ]
   occupiedServices <- Array.catMaybes <$> for services \(port /\ service) -> do
     isPortAvailable port <#> if _ then Nothing else Just (port /\ service)
   unless (Array.null occupiedServices) do
@@ -493,7 +498,11 @@ startPlutipCluster
   -> InitialUTxODistribution
   -> Aff (PrivatePaymentKey /\ ClusterStartupParameters)
 startPlutipCluster cfg keysToGenerate = do
-  let url = mkServerEndpointUrl cfg "start"
+  let
+    url = mkServerEndpointUrl cfg "start"
+    -- TODO epoch size cannot currently be changed due to
+    -- https://github.com/mlabs-haskell/plutip/issues/149
+    epochSize = UInt.fromInt 80
   res <- do
     response <- liftAff
       ( Affjax.request
@@ -505,7 +514,7 @@ startPlutipCluster cfg keysToGenerate = do
                 $ ClusterStartupRequest
                     { keysToGenerate
                     , slotLength: cfg.clusterConfig.slotLength
-                    , epochSize: cfg.clusterConfig.epochSize
+                    , epochSize
                     }
             , responseFormat = Affjax.ResponseFormat.string
             , headers = [ Header.ContentType (wrap "application/json") ]
@@ -569,12 +578,10 @@ stopPlutipCluster cfg = do
 
 startOgmios :: PlutipConfig -> ClusterStartupParameters -> Aff ManagedProcess
 startOgmios cfg params = do
-  -- We wait for any output, because CTL-server tries to connect to Ogmios
-  -- repeatedly, and we can just wait for CTL-server to connect, instead of
-  -- waiting for Ogmios first.
   spawn "ogmios" ogmiosArgs defaultSpawnOptions
     $ Just
-    $ pure Success
+    $ String.indexOf (Pattern "networkParameters")
+        >>> maybe NoOp (const Success)
   where
   ogmiosArgs :: Array String
   ogmiosArgs =
@@ -582,6 +589,47 @@ startOgmios cfg params = do
     , cfg.ogmiosConfig.host
     , "--port"
     , UInt.toString cfg.ogmiosConfig.port
+    , "--node-socket"
+    , params.nodeSocketPath
+    , "--node-config"
+    , params.nodeConfigPath
+    ]
+
+startKupo
+  :: PlutipConfig
+  -> ClusterStartupParameters
+  -> Aff (ManagedProcess /\ String /\ OnSignalRef)
+startKupo cfg params = do
+  tmpDir <- liftEffect tmpdir
+  let
+    workdir = tmpDir <</>> "kupo-db"
+  liftEffect do
+    workdirExists <- FSSync.exists workdir
+    unless workdirExists (FSSync.mkdir workdir)
+  childProcess <- spawnKupoProcess workdir
+  sig <- liftEffect $ cleanupOnSigint' workdir
+  pure (childProcess /\ workdir /\ sig)
+  where
+  spawnKupoProcess :: FilePath -> Aff ManagedProcess
+  spawnKupoProcess workdir =
+    spawn "kupo" (kupoArgs workdir) defaultSpawnOptions $
+      Just (String.indexOf outputString >>> maybe NoOp (const Success))
+    where
+    outputString :: Pattern
+    outputString = Pattern "ConfigurationCheckpointsForIntersection"
+
+  kupoArgs :: FilePath -> Array String
+  kupoArgs workdir =
+    [ "--match"
+    , "*/*"
+    , "--since"
+    , "origin"
+    , "--workdir"
+    , workdir
+    , "--host"
+    , cfg.kupoConfig.host
+    , "--port"
+    , UInt.toString cfg.kupoConfig.port
     , "--node-socket"
     , params.nodeSocketPath
     , "--node-config"
@@ -605,15 +653,22 @@ checkPlutipServer cfg = do
     $ stopPlutipCluster cfg
 
 startPostgresServer
-  :: PostgresConfig -> Aff (ManagedProcess /\ String)
-startPostgresServer pgConfig = do
+  :: PostgresConfig
+  -> ClusterStartupParameters
+  -> Aff (ManagedProcess /\ String /\ OnSignalRef)
+startPostgresServer pgConfig params = do
   tmpDir <- liftEffect tmpdir
   randomStr <- liftEffect $ uniqueId ""
   let
     workingDir = tmpDir <</>> randomStr
     databaseDir = workingDir <</>> "postgres/data"
     postgresSocket = workingDir <</>> "postgres"
-  waitForStop =<< spawn "initdb" [ databaseDir ] defaultSpawnOptions Nothing
+    testClusterDir = (dirname <<< dirname) params.nodeConfigPath
+  sig <- liftEffect $ cleanupOnSigint workingDir testClusterDir
+  waitForStop =<< spawn "initdb"
+    [ "--locale=C", "--encoding=UTF-8", databaseDir ]
+    defaultSpawnOptions
+    Nothing
   pgChildProcess <- spawn "postgres"
     [ "-D"
     , databaseDir
@@ -626,7 +681,7 @@ startPostgresServer pgConfig = do
     ]
     defaultSpawnOptions
     Nothing
-  pure (pgChildProcess /\ workingDir)
+  pure (pgChildProcess /\ workingDir /\ sig)
 
 configurePostgresServer
   :: PostgresConfig -> Aff Unit
@@ -682,6 +737,17 @@ stopChildProcessWithPort port childProcess = do
       unless isAvailable do
         liftEffect $ throw "retry"
 
+stopChildProcessWithPortAndRemoveOnSignal
+  :: UInt -> (ManagedProcess /\ String /\ OnSignalRef) -> Aff Unit
+stopChildProcessWithPortAndRemoveOnSignal port (childProcess /\ _ /\ sig) = do
+  stop $ childProcess
+  void $ recovering defaultRetryPolicy ([ \_ _ -> pure true ])
+    \_ -> do
+      isAvailable <- isPortAvailable port
+      unless isAvailable do
+        liftEffect $ throw "retry"
+  liftEffect $ removeOnSignal sig
+
 startOgmiosDatumCache
   :: PlutipConfig
   -> ClusterStartupParameters
@@ -724,24 +790,30 @@ mkClusterContractEnv
   -> Maybe (LogLevel -> Message -> Aff Unit)
   -> Aff (ContractEnv ())
 mkClusterContractEnv plutipCfg logger customLogger = do
-  datumCacheWs <-
-    QueryM.mkDatumCacheWebSocketAff logger
-      QueryM.defaultDatumCacheWsConfig
-        { port = plutipCfg.ogmiosDatumCacheConfig.port
-        , host = plutipCfg.ogmiosDatumCacheConfig.host
-        }
-  ogmiosWs <- QueryM.mkOgmiosWebSocketAff datumCacheWs logger
-    QueryM.defaultOgmiosWsConfig
-      { port = plutipCfg.ogmiosConfig.port
-      , host = plutipCfg.ogmiosConfig.host
-      }
+  datumCacheWsRef <- liftEffect $ Ref.new Nothing
+  datumCacheWs /\ ogmiosWs <- sequential $
+    Tuple
+      <$> parallel
+        ( QueryM.mkDatumCacheWebSocketAff datumCacheWsRef logger
+            QueryM.defaultDatumCacheWsConfig
+              { port = plutipCfg.ogmiosDatumCacheConfig.port
+              , host = plutipCfg.ogmiosDatumCacheConfig.host
+              }
+        )
+      <*> parallel
+        ( QueryM.mkOgmiosWebSocketAff datumCacheWsRef logger
+            QueryM.defaultOgmiosWsConfig
+              { port = plutipCfg.ogmiosConfig.port
+              , host = plutipCfg.ogmiosConfig.host
+              }
+        )
   usedTxOuts <- newUsedTxOuts
   pparams <- QueryM.getProtocolParametersAff ogmiosWs logger
   pure $ ContractEnv
     { config:
-        { ctlServerConfig: plutipCfg.ctlServerConfig
-        , ogmiosConfig: plutipCfg.ogmiosConfig
+        { ogmiosConfig: plutipCfg.ogmiosConfig
         , datumCacheConfig: plutipCfg.ogmiosDatumCacheConfig
+        , kupoConfig: plutipCfg.kupoConfig
         , networkId: MainnetId
         , logLevel: plutipCfg.logLevel
         , walletSpec: Nothing
@@ -758,15 +830,6 @@ mkClusterContractEnv plutipCfg logger customLogger = do
         }
     , extraConfig: {}
     }
-
-startCtlServer :: UInt -> Aff ManagedProcess
-startCtlServer serverPort = do
-  let ctlServerArgs = [ "--port", UInt.toString serverPort ]
-  spawn "ctl-server" ctlServerArgs defaultSpawnOptions
-    -- Wait for "CTL server starting on port" string in the output
-    $ Just
-    $ String.indexOf (Pattern "CTL server starting on port")
-        >>> maybe NoOp (const Success)
 
 defaultRetryPolicy :: RetryPolicy
 defaultRetryPolicy = limitRetriesByCumulativeDelay (Milliseconds 3000.00) $

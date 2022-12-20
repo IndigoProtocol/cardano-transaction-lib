@@ -12,39 +12,36 @@ import Prelude
 
 import Control.Monad.Reader (withReaderT)
 import Control.Monad.Reader.Trans (ReaderT, asks)
-import Ctl.Internal.Address (addressToOgmiosAddress)
 import Ctl.Internal.Cardano.Types.Transaction (TransactionOutput, UtxoMap)
 import Ctl.Internal.Cardano.Types.TransactionUnspentOutput
   ( TransactionUnspentOutput
   )
 import Ctl.Internal.Cardano.Types.Value (Value)
+import Ctl.Internal.Cardano.Types.Value (geq, lovelaceValueOf) as Value
 import Ctl.Internal.Helpers as Helpers
 import Ctl.Internal.QueryM
   ( QueryM
   , callCip30Wallet
   , getNetworkId
   , getWalletAddresses
-  , mkOgmiosRequest
   )
-import Ctl.Internal.QueryM.Ogmios as Ogmios
+import Ctl.Internal.QueryM.Kupo (getUtxoByOref, utxosAt) as Kupo
 import Ctl.Internal.Serialization.Address (Address)
-import Ctl.Internal.TxOutput
-  ( ogmiosTxOutToTransactionOutput
-  , txOutRefToTransactionInput
-  )
 import Ctl.Internal.Types.Transaction (TransactionInput)
 import Ctl.Internal.Types.UsedTxOuts (UsedTxOuts, isTxOutRefUsed)
-import Ctl.Internal.Wallet (Wallet(Gero, Nami, Flint, Lode, Eternl, KeyWallet))
-import Data.Array (head)
+import Ctl.Internal.Wallet
+  ( Wallet(Gero, Nami, Flint, Lode, Eternl, NuFi, KeyWallet)
+  )
+import Data.Array (cons, foldMap, head)
 import Data.Array as Array
-import Data.Bifunctor (bimap)
-import Data.Bitraversable (bisequence)
-import Data.Foldable (fold, foldr)
+import Data.BigInt as BigInt
+import Data.Either (hush)
+import Data.Foldable (fold, foldl, foldr)
 import Data.Map as Map
 import Data.Maybe (Maybe(Nothing), fromMaybe, maybe)
 import Data.Newtype (unwrap, wrap)
-import Data.Traversable (for, for_, sequence, traverse)
-import Data.Tuple.Nested (type (/\), (/\))
+import Data.Traversable (for, for_, traverse)
+import Data.Tuple.Nested ((/\))
 import Data.UInt as UInt
 import Effect.Aff (Aff)
 import Effect.Aff.Class (liftAff)
@@ -55,52 +52,19 @@ import Effect.Exception (throw)
 -- UtxosAt
 --------------------------------------------------------------------------------
 
--- If required, we can change to Either with more granular error handling.
+-- If required, we can change to `Either` with more granular error handling.
 -- | Gets utxos at an (internal) `Address` in terms of (internal) `Cardano.Transaction.Types`.
 -- | Results may vary depending on `Wallet` type.
-utxosAt
-  :: Address
-  -> QueryM (Maybe UtxoMap)
-utxosAt address =
-  mkUtxoQuery
-    <<< mkOgmiosRequest Ogmios.queryUtxosAtCall _.utxosAt
-    $ addressToOgmiosAddress address
+utxosAt :: Address -> QueryM (Maybe UtxoMap)
+utxosAt address = mkUtxoQuery (hush <$> Kupo.utxosAt address)
 
--- | Queries for UTxO given a transaction input filtering out collaterals.
-getUtxo
-  :: TransactionInput -> QueryM (Maybe TransactionOutput)
-getUtxo ref = do
-  res <- mkOgmiosRequest Ogmios.queryUtxoCall _.utxo ref
-  pure $ convertUtxos res >>= Map.lookup ref
+-- | Queries for an utxo given a transaction input.
+getUtxo :: TransactionInput -> QueryM (Maybe TransactionOutput)
+getUtxo = map (join <<< hush) <<< Kupo.getUtxoByOref
 
-  where
-  convertUtxos :: Ogmios.UtxoQR -> Maybe UtxoMap
-  convertUtxos (Ogmios.UtxoQR utxoQueryResult) =
-    let
-      out'
-        :: Array
-             ( Maybe TransactionInput /\ Maybe
-                 TransactionOutput
-             )
-      out' = Map.toUnfoldable utxoQueryResult
-        <#> bimap
-          txOutRefToTransactionInput
-          ogmiosTxOutToTransactionOutput
-
-      out
-        :: Maybe
-             ( Array
-                 ( TransactionInput /\
-                     TransactionOutput
-                 )
-             )
-      out = out' <#> bisequence # sequence
-    in
-      Map.fromFoldable <$> out
-
-mkUtxoQuery :: QueryM Ogmios.UtxoQR -> QueryM (Maybe UtxoMap)
-mkUtxoQuery query = asks (_.runtime >>> _.wallet) >>= maybe allUtxosAt
-  utxosAtByWallet
+mkUtxoQuery :: QueryM (Maybe UtxoMap) -> QueryM (Maybe UtxoMap)
+mkUtxoQuery allUtxosAt =
+  maybe allUtxosAt utxosAtByWallet =<< asks (_.wallet <<< _.runtime)
   where
   -- Add more wallet types here:
   utxosAtByWallet :: Wallet -> QueryM (Maybe UtxoMap)
@@ -110,36 +74,8 @@ mkUtxoQuery query = asks (_.runtime >>> _.wallet) >>= maybe allUtxosAt
     Flint _ -> cip30UtxosAt
     Eternl _ -> cip30UtxosAt
     Lode _ -> cip30UtxosAt
+    NuFi _ -> cip30UtxosAt
     KeyWallet _ -> allUtxosAt
-
-  -- Gets all utxos at an (internal) Address in terms of (internal)
-  -- Cardano.Transaction.Types.
-  allUtxosAt :: QueryM (Maybe UtxoMap)
-  allUtxosAt = convertUtxos <$> query
-    where
-    convertUtxos :: Ogmios.UtxoQR -> Maybe UtxoMap
-    convertUtxos (Ogmios.UtxoQR utxoQueryResult) =
-      let
-        out'
-          :: Array
-               ( Maybe TransactionInput /\ Maybe
-                   TransactionOutput
-               )
-        out' = Map.toUnfoldable utxoQueryResult
-          <#> bimap
-            txOutRefToTransactionInput
-            ogmiosTxOutToTransactionOutput
-
-        out
-          :: Maybe
-               ( Array
-                   ( TransactionInput /\
-                       TransactionOutput
-                   )
-               )
-        out = out' <#> bisequence # sequence
-      in
-        Map.fromFoldable <$> out
 
   cip30UtxosAt :: QueryM (Maybe UtxoMap)
   cip30UtxosAt = getWalletCollateral >>= maybe
@@ -178,6 +114,7 @@ getWalletBalance = do
     Eternl wallet -> liftAff $ wallet.getBalance wallet.connection
     Flint wallet -> liftAff $ wallet.getBalance wallet.connection
     Lode wallet -> liftAff $ wallet.getBalance wallet.connection
+    NuFi wallet -> liftAff $ wallet.getBalance wallet.connection
     KeyWallet _ -> do
       -- Implement via `utxosAt`
       addresses <- getWalletAddresses
@@ -196,6 +133,7 @@ getWalletUtxos = do
     Eternl wallet -> liftAff $ wallet.getUtxos wallet.connection <#> map
       toUtxoMap
     Lode wallet -> liftAff $ wallet.getUtxos wallet.connection <#> map toUtxoMap
+    NuFi wallet -> liftAff $ wallet.getUtxos wallet.connection <#> map toUtxoMap
     KeyWallet _ -> do
       mbAddress <- getWalletAddresses <#> head
       map join $ for mbAddress utxosAt
@@ -213,6 +151,7 @@ getWalletCollateral = do
       Flint wallet -> liftAff $ callCip30Wallet wallet _.getCollateral
       Lode wallet -> liftAff $ callCip30Wallet wallet _.getCollateral
       Eternl wallet -> liftAff $ callCip30Wallet wallet _.getCollateral
+      NuFi wallet -> liftAff $ callCip30Wallet wallet _.getCollateral
       KeyWallet kw -> do
         networkId <- getNetworkId
         addr <- liftAff $ (unwrap kw).address networkId
@@ -226,7 +165,30 @@ getWalletCollateral = do
         liftEffect $ (unwrap kw).selectCollateral coinsPerUtxoUnit
           maxCollateralInputs
           utxos
-  for_ mbCollateralUTxOs \collateralUTxOs -> do
+
+  let
+    {- This is a workaround for the case where Eternl wallet,
+       in addition to designated collateral UTxO, returns all UTxO's with
+       small enough Ada value that can be used as potential collateral, which
+       in turn would result in those UTxO's being filtered out of the balancer's
+       available set, and in certain circumstances fail unexpectedly with a
+       `InsufficientTxInputs` error.
+       The snippet (`sufficientUtxos`) below prevents this by taking the first
+       N UTxO's returned by `getCollateral`, such that their total Ada value
+       is greater than or equal to 5 Ada.
+    -}
+    targetCollateral = Value.lovelaceValueOf $ BigInt.fromInt 5_000_000
+    utxoValue u = (unwrap (unwrap u).output).amount
+    sufficientUtxos = mbCollateralUTxOs <#> \colUtxos ->
+      foldl
+        ( \us u ->
+            if foldMap utxoValue us `Value.geq` targetCollateral then us
+            else cons u us
+        )
+        []
+        colUtxos
+
+  for_ sufficientUtxos \collateralUTxOs -> do
     pparams <- asks $ _.runtime >>> _.pparams
     let
       tooManyCollateralUTxOs =
@@ -234,7 +196,7 @@ getWalletCollateral = do
           (unwrap pparams).maxCollateralInputs
     when tooManyCollateralUTxOs do
       liftEffect $ throw tooManyCollateralUTxOsError
-  pure mbCollateralUTxOs
+  pure sufficientUtxos
   where
   tooManyCollateralUTxOsError =
     "Wallet returned too many UTxOs as collateral. This is likely a bug in \

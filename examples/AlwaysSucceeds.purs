@@ -1,6 +1,6 @@
 -- | This module demonstrates how the `Contract` interface can be used to build,
 -- | balance, and submit a smart-contract transaction. It creates a transaction
--- | that pays two Ada to the `AlwaysSucceeds` script address
+-- | that pays two Ada to the `AlwaysSucceeds` script address.
 module Ctl.Examples.AlwaysSucceeds
   ( alwaysSucceeds
   , alwaysSucceedsScript
@@ -13,7 +13,7 @@ module Ctl.Examples.AlwaysSucceeds
 
 import Contract.Prelude
 
-import Contract.Address (ownStakePubKeyHash, scriptHashAddress)
+import Contract.Address (ownStakePubKeysHashes, scriptHashAddress)
 import Contract.Config (ConfigParams, testnetNamiConfig)
 import Contract.Credential (Credential(PubKeyCredential))
 import Contract.Log (logInfo')
@@ -27,17 +27,16 @@ import Contract.Transaction
   , _input
   , awaitTxConfirmed
   , lookupTxHash
+  , submitTxFromConstraints
   )
 import Contract.TxConstraints (TxConstraints)
 import Contract.TxConstraints as Constraints
 import Contract.Utxos (utxosAt)
 import Contract.Value as Value
 import Control.Monad.Error.Class (liftMaybe)
-import Ctl.Examples.Helpers (buildBalanceSignAndSubmitTx) as Helpers
 import Data.Array (head)
 import Data.BigInt as BigInt
 import Data.Lens (view)
-import Data.Map as Map
 import Effect.Exception (error)
 
 main :: Effect Unit
@@ -61,7 +60,7 @@ example cfg = launchAff_ do
 payToAlwaysSucceeds :: ValidatorHash -> Contract () TransactionHash
 payToAlwaysSucceeds vhash = do
   -- Send to own stake credential. This is used to test mustPayToScriptAddress.
-  mbStakeKeyHash <- ownStakePubKeyHash
+  mbStakeKeyHash <- join <<< head <$> ownStakePubKeysHashes
   let
     constraints :: TxConstraints Unit Unit
     constraints =
@@ -82,7 +81,7 @@ payToAlwaysSucceeds vhash = do
     lookups :: Lookups.ScriptLookups PlutusData
     lookups = mempty
 
-  Helpers.buildBalanceSignAndSubmitTx lookups constraints
+  submitTxFromConstraints lookups constraints
 
 spendFromAlwaysSucceeds
   :: ValidatorHash
@@ -91,32 +90,32 @@ spendFromAlwaysSucceeds
   -> Contract () Unit
 spendFromAlwaysSucceeds vhash validator txId = do
   -- Use own stake credential if available
-  mbStakeKeyHash <- ownStakePubKeyHash
+  mbStakeKeyHash <- join <<< head <$> ownStakePubKeysHashes
   let
     scriptAddress =
       scriptHashAddress vhash (PubKeyCredential <<< unwrap <$> mbStakeKeyHash)
-  utxos <- fromMaybe Map.empty <$> utxosAt scriptAddress
-  case view _input <$> head (lookupTxHash txId utxos) of
-    Just txInput ->
-      let
-        lookups :: Lookups.ScriptLookups PlutusData
-        lookups = Lookups.validator validator
-          <> Lookups.unspentOutputs utxos
+  utxos <- utxosAt scriptAddress
+  txInput <-
+    liftM
+      ( error
+          ( "The id "
+              <> show txId
+              <> " does not have output locked at: "
+              <> show scriptAddress
+          )
+      )
+      (view _input <$> head (lookupTxHash txId utxos))
+  let
+    lookups :: Lookups.ScriptLookups PlutusData
+    lookups = Lookups.validator validator
+      <> Lookups.unspentOutputs utxos
 
-        constraints :: TxConstraints Unit Unit
-        constraints =
-          Constraints.mustSpendScriptOutput txInput unitRedeemer
-      in
-        do
-          spendTxId <- Helpers.buildBalanceSignAndSubmitTx lookups constraints
-          awaitTxConfirmed spendTxId
-          logInfo' "Successfully spent locked values."
-
-    _ ->
-      logInfo' $ "The id "
-        <> show txId
-        <> " does not have output locked at: "
-        <> show scriptAddress
+    constraints :: TxConstraints Unit Unit
+    constraints =
+      Constraints.mustSpendScriptOutput txInput unitRedeemer
+  spendTxId <- submitTxFromConstraints lookups constraints
+  awaitTxConfirmed spendTxId
+  logInfo' "Successfully spent locked values."
 
 foreign import alwaysSucceeds :: String
 

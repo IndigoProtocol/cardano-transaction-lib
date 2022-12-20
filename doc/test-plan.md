@@ -4,15 +4,25 @@ This document outlines CTL's test plan, i.e. a formalized description of testing
 
 **Table of Contents**
 
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
 - [User interactions](#user-interactions)
   - [Constraints/lookups](#constraintslookups)
-    - [Exceptions](#exceptions)
+    - [Stake operations](#stake-operations)
+      - [Stake pools](#stake-pools)
+      - [Stake credential registration](#stake-credential-registration)
+      - [Delegation](#delegation)
+      - [Rewards withdrawal](#rewards-withdrawal)
+      - [Stake credential deregistration](#stake-credential-deregistration)
   - [Other functionality](#other-functionality)
 - [Acceptance criteria](#acceptance-criteria)
   - [Example contracts as tests](#example-contracts-as-tests)
-  - [Test environments](#test-environments)
+    - [Test environments](#test-environments)
   - [Unit and integration testing](#unit-and-integration-testing)
     - [Required parsing tests](#required-parsing-tests)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ## User interactions
 
@@ -43,7 +53,7 @@ CTL's primary user interface is its constraints and lookups API, modeled after t
 - [x] `mustSatisfyAnyOf`
 - [x] `mustSpendAtLeastTotal`. Also implies
   - [x] `mustSpendAtLeast`
-- [ ] `mustValidateIn`
+- [x] `mustValidateIn`
 
 The following constraints were added for `PlutusV2` features as part of our `v2.0.0` release. They do not have direct correspondances in `plutus-apps`:
 
@@ -55,6 +65,7 @@ The following constraints were added for `PlutusV2` features as part of our `v2.
 - [x] `mustPayToPubKeyAddressWithScriptRef`
 - [x] `mustPayToPubKeyWithDatumAndScriptRef`
 - [x] `mustPayToPubKeyWithScriptRef`
+- [x] `mustReferenceOutput`
 - [x] `mustSpendScriptOutputUsingScriptRef`
 
 That release also included the following constraints for working with native scripts, which also have no `plutus-apps` analogue:

@@ -1,6 +1,7 @@
 module Ctl.Internal.Types.ScriptLookups
   ( MkUnbalancedTxError
       ( CannotConvertPOSIXTimeRange
+      , CannotSolveTimeConstraints
       , CannotConvertPaymentPubKeyHash
       , CannotFindDatum
       , CannotGetMintingPolicyScriptIndex
@@ -18,7 +19,6 @@ module Ctl.Internal.Types.ScriptLookups
       , DatumWrongHash
       , MintingPolicyHashNotCurrencySymbol
       , MintingPolicyNotFound
-      , MkTypedTxOutFailed
       , ModifyTx
       , OwnPubKeyAndStakeKeyMissing
       , TxOutRefNotFound
@@ -55,7 +55,7 @@ import Prelude hiding (join)
 
 import Aeson (class EncodeAeson)
 import Contract.Hashing (plutusScriptStakeValidatorHash)
-import Control.Monad.Error.Class (catchError, liftMaybe, throwError)
+import Control.Monad.Error.Class (catchError, throwError)
 import Control.Monad.Except.Trans (ExceptT(ExceptT), except, runExceptT)
 import Control.Monad.State.Trans (StateT, get, gets, put, runStateT)
 import Control.Monad.Trans.Class (lift)
@@ -157,6 +157,9 @@ import Ctl.Internal.Types.Datum (DataHash, Datum)
 import Ctl.Internal.Types.Interval
   ( POSIXTimeRange
   , PosixTimeToSlotError
+  , always
+  , intersection
+  , isEmpty
   , posixTimeRangeToTransactionValidity
   )
 import Ctl.Internal.Types.OutputDatum
@@ -245,7 +248,7 @@ import Ctl.Internal.Types.UnbalancedTransaction
   , _utxoIndex
   , emptyUnbalancedTx
   )
-import Data.Array (filter, mapWithIndex, toUnfoldable, zip)
+import Data.Array (cons, filter, mapWithIndex, partition, toUnfoldable, zip)
 import Data.Array (singleton, union, (:)) as Array
 import Data.Bifunctor (lmap)
 import Data.BigInt (BigInt, fromInt)
@@ -272,6 +275,7 @@ import Data.Tuple.Nested (type (/\), (/\))
 import Effect (Effect)
 import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
+import MedeaPrelude (mapMaybe)
 import Type.Proxy (Proxy(Proxy))
 
 -- Taken mainly from https://playground.plutus.iohkdev.io/doc/haddock/plutus-ledger-constraints/html/Ledger-Constraints-OffChain.html
@@ -417,10 +421,9 @@ validatorM :: forall (a :: Type). Validator -> Maybe (ScriptLookups a)
 validatorM = pure <<< validator
 
 -- | A script lookups value with a datum.
-datum :: forall (a :: Type). Datum -> Maybe (ScriptLookups a)
+datum :: forall (a :: Type). Datum -> ScriptLookups a
 datum dt =
-  Hashing.datumHash dt
-    <#> \dh -> over ScriptLookups _ { datums = singleton dh dt } mempty
+  over ScriptLookups _ { datums = singleton (Hashing.datumHash dt) dt } mempty
 
 -- | Add your own `PaymentPubKeyHash` to the lookup.
 ownPaymentPubKeyHash :: forall (a :: Type). PaymentPubKeyHash -> ScriptLookups a
@@ -603,7 +606,10 @@ processLookupsAndConstraints
     mpsMap = fromFoldable $ zip mpsHashes mps
     osMap = fromFoldable $ zip validatorHashes scripts
 
-  ExceptT $ foldConstraints (processConstraint mpsMap osMap) constraints
+  timeConstraintsSolved <- except $ resumeTimeConstraints constraints
+
+  ExceptT $ foldConstraints (processConstraint mpsMap osMap)
+    timeConstraintsSolved
 
   -- Attach mint redeemers to witness set.
   mintRedeemers :: Array _ <- use _mintRedeemers <#> Map.toUnfoldable
@@ -838,10 +844,10 @@ addOwnOutput (OutputConstraint { datum: d, value }) = do
   runExceptT do
     ScriptLookups { typedValidator } <- use _lookups
     inst <- liftM TypedValidatorMissing typedValidator
-    let value' = fromPlutusValue value
-    typedTxOut <- except $ mkTypedTxOut networkId inst d value'
-      # note MkTypedTxOutFailed
-    let txOut = typedTxOutTxOut typedTxOut
+    let
+      value' = fromPlutusValue value
+      typedTxOut = mkTypedTxOut networkId inst d value'
+      txOut = typedTxOutTxOut typedTxOut
     -- We are erroring if we don't have a datumhash given the polymorphic datum
     -- in the `OutputConstraint`:
     dHash <- liftM TypedTxOutHasNoDatumHash (typedTxOutDatumHash typedTxOut)
@@ -851,17 +857,51 @@ addOwnOutput (OutputConstraint { datum: d, value }) = do
     ExceptT $ addDatum dat
     _valueSpentBalancesOutputs <>= provideValue value'
 
+resumeTimeConstraints
+  :: Array TxConstraint -> Either MkUnbalancedTxError (Array TxConstraint)
+resumeTimeConstraints constraints = do
+  let
+    { no: nonTimeConstraints, yes: timeConstraints } = partition
+      isTimeConstraint
+      constraints
+    intervals = mapMaybe constraintToInterval timeConstraints
+  newInterval <- foldM mergeIntervals always intervals
+  pure $ cons (MustValidateIn newInterval) nonTimeConstraints
+  where
+  mergeIntervals
+    :: POSIXTimeRange
+    -> POSIXTimeRange
+    -> Either MkUnbalancedTxError POSIXTimeRange
+  mergeIntervals interval1 interval2 =
+    let
+      newInterval :: POSIXTimeRange
+      newInterval = intersection interval1 interval2
+    in
+      if isEmpty newInterval then Left $ CannotSolveTimeConstraints interval1
+        interval2
+      else pure newInterval
+
+  constraintToInterval :: TxConstraint -> Maybe POSIXTimeRange
+  constraintToInterval = case _ of
+    MustValidateIn x -> Just x
+    _ -> Nothing
+
+  isTimeConstraint :: TxConstraint -> Boolean
+  isTimeConstraint (MustValidateIn _) = true
+  isTimeConstraint _ = false
+
 data MkUnbalancedTxError
-  = CannotConvertPOSIXTimeRange POSIXTimeRange PosixTimeToSlotError
-  | CannotConvertPaymentPubKeyHash PaymentPubKeyHash
+  = CannotConvertPaymentPubKeyHash PaymentPubKeyHash
   | CannotFindDatum
+  | CannotQueryDatum DataHash
+  | CannotConvertPOSIXTimeRange POSIXTimeRange PosixTimeToSlotError
+  | CannotSolveTimeConstraints POSIXTimeRange POSIXTimeRange
   | CannotGetMintingPolicyScriptIndex -- Should be impossible
   | CannotGetValidatorHashFromAddress Address -- Get `ValidatorHash` from internal `Address`
   | CannotHashDatum Datum
   | CannotHashMintingPolicy MintingPolicy
   | CannotHashValidator Validator
   | CannotMakeValue CurrencySymbol TokenName BigInt
-  | CannotQueryDatum DataHash
   | CannotWithdrawRewardsPubKey StakePubKeyHash
   | CannotWithdrawRewardsPlutusScript PlutusScriptStakeValidator
   | CannotWithdrawRewardsNativeScript NativeScriptStakeValidator
@@ -869,7 +909,6 @@ data MkUnbalancedTxError
   | DatumWrongHash DataHash Datum
   | MintingPolicyHashNotCurrencySymbol MintingPolicyHash
   | MintingPolicyNotFound MintingPolicyHash
-  | MkTypedTxOutFailed
   | ModifyTx ModifyTxError
   | OwnPubKeyAndStakeKeyMissing
   | TxOutRefNotFound TransactionInput
@@ -1198,7 +1237,7 @@ processConstraint mpsMap osMap = do
         -- Array of datums.
         datum' <- for mDatum \(dat /\ datp) -> do
           when (datp == DatumWitness) $ ExceptT $ addDatum dat
-          outputDatum dat datp
+          pure $ outputDatum dat datp
         let
           address = case skh of
             Just skh' -> payPubKeyHashBaseAddress networkId pkh skh'
@@ -1215,17 +1254,16 @@ processConstraint mpsMap osMap = do
       networkId <- getNetworkId
       let amount = fromPlutusValue plutusValue
       runExceptT do
-        datum' <- outputDatum dat datp
         let
+          datum' = outputDatum dat datp
           txOut = TransactionOutput
-            { address:
-                case mbCredential of
-                  Nothing -> validatorHashEnterpriseAddress networkId vlh
-                  Just cred -> baseAddressToAddress $ baseAddress
-                    { network: networkId
-                    , paymentCred: scriptHashCredential (unwrap vlh)
-                    , delegationCred: credentialToStakeCredential cred
-                    }
+            { address: case mbCredential of
+                Nothing -> validatorHashEnterpriseAddress networkId vlh
+                Just cred -> baseAddressToAddress $ baseAddress
+                  { network: networkId
+                  , paymentCred: scriptHashCredential (unwrap vlh)
+                  , delegationCred: credentialToStakeCredential cred
+                  }
             , amount
             -- TODO: save correct and scriptRef, should be done in
             -- Constraints API upgrade that follows Vasil
@@ -1257,8 +1295,8 @@ processConstraint mpsMap osMap = do
         _cpsToTxBody <<< _outputs %= Array.(:) txOut
         _valueSpentBalancesOutputs <>= provideValue amount
     MustHashDatum dh dt -> do
-      let mdh = Hashing.datumHash dt
-      if mdh == Just dh then addDatum dt
+      let dh' = Hashing.datumHash dt
+      if dh' == dh then addDatum dt
       else pure $ throwError $ DatumWrongHash dh dt
     MustRegisterStakePubKey skh -> runExceptT do
       lift $ addCertificate
@@ -1411,14 +1449,10 @@ processConstraint mpsMap osMap = do
   outputDatum
     :: Datum
     -> DatumPresence
-    -> ExceptT
-         MkUnbalancedTxError
-         (StateT (ConstraintProcessingState a) (QueryMExtended () Aff))
-         OutputDatum
+    -> OutputDatum
   outputDatum dat = case _ of
-    DatumInline -> pure $ OutputDatum dat
-    DatumWitness -> OutputDatumHash <$> liftMaybe (CannotHashDatum dat)
-      (Hashing.datumHash dat)
+    DatumInline -> OutputDatum dat
+    DatumWitness -> OutputDatumHash $ Hashing.datumHash dat
 
 credentialToStakeCredential :: Credential -> StakeCredential
 credentialToStakeCredential cred = case cred of
