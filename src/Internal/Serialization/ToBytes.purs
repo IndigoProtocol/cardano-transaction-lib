@@ -9,6 +9,7 @@ import Ctl.Internal.Serialization.Types
   , GenesisHash
   , NativeScript
   , PlutusData
+  , PlutusDatumMap
   , Redeemers
   , ScriptDataHash
   , Transaction
@@ -32,6 +33,7 @@ foreign import toBytes
          |+| TransactionHash
          |+| DataHash
          |+| PlutusData
+         |+| PlutusDatumMap
          |+| TransactionWitnessSet
          |+| NativeScript
          |+| ScriptDataHash

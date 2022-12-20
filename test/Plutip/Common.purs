@@ -52,6 +52,10 @@ config =
       }
   , suppressLogs: true
   , customLogger: Nothing
+  , clusterConfig:
+      { slotLength: Seconds 0.1
+      , epochSize: UInt.fromInt 30
+      }
   , hooks: emptyHooks
   , clusterConfig: defaultClusterConfig
   }

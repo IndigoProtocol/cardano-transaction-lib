@@ -70,6 +70,10 @@ type PlutipConfig =
   , postgresConfig :: PostgresConfig
   , customLogger :: Maybe (LogLevel -> Message -> Aff Unit)
   , suppressLogs :: Boolean
+  , clusterConfig ::
+      { slotLength :: Seconds
+      , epochSize :: UInt
+      }
   , hooks :: Hooks
   , clusterConfig :: ClusterConfig
   }
