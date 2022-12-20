@@ -3,14 +3,16 @@
 In order to run CTL's `Contract` effects, several services are required. These can be configured through a `ContractEnv` that holds websocket connections, information about server hosts/ports, and other requisite information.
 
 **Table of Contents**
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 
 - [Current services](#current-services)
+- [Using NixOS module](#using-nixos-module)
 - [Using CTL's `runtime` overlay](#using-ctls-runtime-overlay)
 - [Changing network configurations](#changing-network-configurations)
-- [Other requirements](#other-requirements)
-  - [With Nami:](#with-nami)
-  - [With Gero:](#with-gero)
+- [Wallet requirements](#wallet-requirements)
 
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 ### Current services
 
 The services that are currently **required** are:
@@ -19,19 +21,17 @@ The services that are currently **required** are:
   - You **must** use Ogmios v5.2.0 or greater with CTL
   - Ogmios itself requires a running Cardano node, so you may also need to deploy a node. Node v1.34.0 or greater is recommended
   - You can also use [our fork](https://github.com/mlabs-haskell/ogmios) which has improved Nix integration
+- [Kupo](https://github.com/CardanoSolutions/kupo)
+  - Required to query UTxOs and resolve inline datums and reference scripts
+  - You **must** use Kupo v2.2.0 or greater with CTL
+  - Like Ogmios, Kupo requires a running Cardano node
 - [`ogmios-datum-cache`](https://github.com/mlabs-haskell/ogmios-datum-cache)
   - This is required to query for datums, which Ogmios itself does not support
   - This in turn requires a PostgreSQL DB
 
-Optional services:
-
-- [Our Haskell server](../server/README.md)
-  - We hope to deprecate this in the future, but we use it at the moment to apply arguments to Plutus scripts, which is hard to implement on front-end.
-  - To build the server project, run the following from the repository root: `nix build -L .#ctl-server:exe:ctl-server`
-
 ### Using NixOS module
 
-`ctl-server` and its dependencies can be configured and started via NixOS modules. See [../nix/test-nixos-configuration.nix](../nix/test-nixos-configuration.nix) for example usage and [../nix/ctl-server-nixos-module.nix](../nix/ctl-server-nixos-module.nix) for module options.
+CTL's dependencies can be configured and started via NixOS modules. See [nix/test-nixos-configuration.nix](../nix/test-nixos-configuration.nix) for example.
 
 ### Using CTL's `runtime` overlay
 
@@ -55,21 +55,10 @@ inputs.cardano-transaction-lib.inputs.cardano-configurations.follows = "...";
 
 When changing networks, make sure that `network.magic` is correctly synchronized with value in config (see `protocolConsts.protocolMagic` in `byron.json`).
 
-### Other requirements
+### Wallet requirements
 
-In order to run most `Contract` actions in the browser, **you must use Nami or Gero wallet**. The following steps must be taken to ensure that you can run CTL contracts:
+In order to run most `Contract` actions in the browser, **you must use one of the supported wallets**. The following steps must be taken to ensure that you can run CTL contracts:
 
-#### With Nami:
-
-1. Install [Nami extension](https://chrome.google.com/webstore/detail/nami/lpfcbjknijpeeillifnkikgncikgfhdo)
-   - Due to limitations with Nami itself, only Chromium-based browsers are supported
-2. Make sure that you have an active wallet
-3. Make sure that your wallet is running on the testnet (can be configured via a toggle in the settings menu)
-4. Make sure that you have set collateral for the wallet, which Nami reserves apart from other wallet UTxOs
-
-#### With Gero:
-
-1. Install [GeroWallet Testnet extension](https://chrome.google.com/webstore/detail/gerowallet-testnet/iifeegfcfhlhhnilhfoeihllenamcfgc)
-   - Due to limitations with Gero itself, only Chromium-based browsers are supported
-2. Make sure that you have an active wallet
-3. Make sure that you have set collateral for the wallet, which Gero reserves apart from other wallet UTxOs
+1. Make sure that your wallet is running on the testnet (some wallets can be configured via a toggle in the settings menu, other provide a separate extension)
+2. Fund the wallet using the [Testnet Faucet](https://docs.cardano.org/cardano-testnet/tools/faucet/)
+3. Make sure that you have set collateral for the wallet, which wallets reserve apart from other UTxOs

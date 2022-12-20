@@ -27,7 +27,6 @@ module Ctl.Internal.QueryM
   , WebSocket(WebSocket)
   , Hooks
   , allowError
-  , applyArgs
   , evaluateTxOgmios
   , getChainTip
   , getDatumByHash
@@ -41,6 +40,7 @@ module Ctl.Internal.QueryM
   , getProtocolParametersAff
   , getWalletAddresses
   , getWallet
+  , handleAffjaxResponse
   , liftQueryM
   , listeners
   , postAeson
@@ -111,7 +111,7 @@ import Control.Monad.Rec.Class (class MonadRec)
 import Control.Parallel (class Parallel, parallel, sequential)
 import Control.Plus (class Plus)
 import Ctl.Internal.Cardano.Types.Transaction (PoolPubKeyHash)
-import Ctl.Internal.Helpers (liftM, logString, logWithLevel, (<</>>))
+import Ctl.Internal.Helpers (liftM, logString, logWithLevel)
 import Ctl.Internal.JsWebSocket
   ( JsWebSocket
   , Url
@@ -171,7 +171,6 @@ import Ctl.Internal.QueryM.ServerConfig
   , ServerConfig
   , defaultDatumCacheWsConfig
   , defaultOgmiosWsConfig
-  , defaultServerConfig
   , mkHttpUrl
   , mkOgmiosDatumCacheWsUrl
   , mkServerUrl
@@ -179,12 +178,10 @@ import Ctl.Internal.QueryM.ServerConfig
   ) as ExportServerConfig
 import Ctl.Internal.QueryM.ServerConfig
   ( ServerConfig
-  , mkHttpUrl
   , mkOgmiosDatumCacheWsUrl
   , mkWsUrl
   )
 import Ctl.Internal.QueryM.UniqueId (ListenerId)
-import Ctl.Internal.Serialization (toBytes) as Serialization
 import Ctl.Internal.Serialization.Address
   ( Address
   , NetworkId(TestnetId, MainnetId)
@@ -193,32 +190,31 @@ import Ctl.Internal.Serialization.Address
   , baseAddressFromAddress
   , stakeCredentialToKeyHash
   )
-import Ctl.Internal.Serialization.PlutusData (convertPlutusData) as Serialization
 import Ctl.Internal.Types.ByteArray (byteArrayToHex)
 import Ctl.Internal.Types.CborBytes (CborBytes)
 import Ctl.Internal.Types.Chain as Chain
 import Ctl.Internal.Types.Datum (DataHash, Datum)
-import Ctl.Internal.Types.PlutusData (PlutusData)
 import Ctl.Internal.Types.PubKeyHash
   ( PaymentPubKeyHash
   , PubKeyHash
   , StakePubKeyHash
   )
 import Ctl.Internal.Types.RawBytes (RawBytes)
-import Ctl.Internal.Types.Scripts (Language, PlutusScript(PlutusScript))
+import Ctl.Internal.Types.Scripts (PlutusScript)
 import Ctl.Internal.Types.Transaction (TransactionInput)
 import Ctl.Internal.Types.UsedTxOuts (UsedTxOuts, newUsedTxOuts)
 import Ctl.Internal.Wallet
   ( Cip30Connection
   , Cip30Wallet
   , KeyWallet
-  , Wallet(KeyWallet, Lode, Flint, Gero, Nami, Eternl)
+  , Wallet(KeyWallet, Lode, Flint, Gero, Nami, Eternl, NuFi)
   , WalletExtension
       ( LodeWallet
       , EternlWallet
       , FlintWallet
       , GeroWallet
       , NamiWallet
+      , NuFiWallet
       )
   , mkKeyWallet
   , mkWalletAff
@@ -239,8 +235,10 @@ import Ctl.Internal.Wallet.Spec
       , ConnectToFlint
       , ConnectToEternl
       , ConnectToLode
+      , ConnectToNuFi
       )
   )
+import Data.Array (catMaybes)
 import Data.Array (singleton) as Array
 import Data.Bifunctor (lmap)
 import Data.Either (Either(Left, Right), either, hush, isRight)
@@ -255,7 +253,7 @@ import Data.Maybe (Maybe(Just, Nothing), fromMaybe, isJust, maybe)
 import Data.MediaType.Common (applicationJSON)
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Traversable (for, for_, traverse, traverse_)
-import Data.Tuple (Tuple(Tuple), fst, snd)
+import Data.Tuple (fst)
 import Data.Tuple.Nested (type (/\), (/\))
 import Effect (Effect)
 import Effect.Aff
@@ -273,9 +271,8 @@ import Effect.Aff
 import Effect.Aff.Class (class MonadAff, liftAff)
 import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Exception (Error, error, throw, try)
+import Effect.Ref (Ref)
 import Effect.Ref as Ref
-import Foreign.Object as Object
-import Untagged.Union (asOneOf)
 
 -- This module defines an Aff interface for Ogmios Websocket Queries
 -- Since WebSockets do not define a mechanism for linking request/response
@@ -286,9 +283,9 @@ import Untagged.Union (asOneOf)
 -- | a local cluster: paramters to connect to the services and private keys
 -- | that are pre-funded with Ada on that cluster
 type ClusterSetup =
-  { ctlServerConfig :: Maybe ServerConfig
-  , ogmiosConfig :: ServerConfig
+  { ogmiosConfig :: ServerConfig
   , datumCacheConfig :: ServerConfig
+  , kupoConfig :: ServerConfig
   , keys ::
       { payment :: PrivatePaymentKey
       , stake :: Maybe PrivateStakeKey
@@ -319,9 +316,9 @@ emptyHooks =
 -- | - wallet setup instructions
 -- | - optional custom logger
 type QueryConfig =
-  { ctlServerConfig :: Maybe ServerConfig
-  , ogmiosConfig :: ServerConfig
+  { ogmiosConfig :: ServerConfig
   , datumCacheConfig :: ServerConfig
+  , kupoConfig :: ServerConfig
   , networkId :: NetworkId
   , logLevel :: LogLevel
   , walletSpec :: Maybe WalletSpec
@@ -482,7 +479,8 @@ stopQueryRuntime runtime = do
 
 -- | Used in `mkQueryRuntime` only
 data QueryRuntimeModel = QueryRuntimeModel
-  (OgmiosWebSocket /\ DatumCacheWebSocket /\ Ogmios.ProtocolParameters)
+  DatumCacheWebSocket
+  (OgmiosWebSocket /\ Ogmios.ProtocolParameters)
   (Maybe Wallet)
 
 mkQueryRuntime
@@ -491,15 +489,18 @@ mkQueryRuntime
 mkQueryRuntime config = do
   for_ config.hooks.beforeInit (void <<< liftEffect <<< try)
   usedTxOuts <- newUsedTxOuts
-  QueryRuntimeModel (ogmiosWs /\ datumCacheWs /\ pparams) wallet <- sequential $
+  datumCacheWsRef <- liftEffect $ Ref.new Nothing
+  QueryRuntimeModel datumCacheWs (ogmiosWs /\ pparams) wallet <- sequential $
     QueryRuntimeModel
-      <$> parallel do
-        datumCacheWs <-
-          mkDatumCacheWebSocketAff logger config.datumCacheConfig
+      <$> parallel
+        ( mkDatumCacheWebSocketAff datumCacheWsRef logger
+            config.datumCacheConfig
+        )
+      <*> parallel do
         ogmiosWs <-
-          mkOgmiosWebSocketAff datumCacheWs logger config.ogmiosConfig
+          mkOgmiosWebSocketAff datumCacheWsRef logger config.ogmiosConfig
         pparams <- getProtocolParametersAff ogmiosWs logger
-        pure $ ogmiosWs /\ datumCacheWs /\ pparams
+        pure $ ogmiosWs /\ pparams
       <*> parallel (for config.walletSpec mkWalletBySpec)
   pure
     { ogmiosWs
@@ -527,6 +528,7 @@ mkWalletBySpec = case _ of
   ConnectToFlint -> mkWalletAff FlintWallet
   ConnectToEternl -> mkWalletAff EternlWallet
   ConnectToLode -> mkWalletAff LodeWallet
+  ConnectToNuFi -> mkWalletAff NuFiWallet
 
 runQueryM :: forall (a :: Type). QueryConfig -> QueryM a -> Aff a
 runQueryM config action = do
@@ -704,6 +706,7 @@ actionBasedOnWallet walletAction keyWalletAction =
     Gero wallet -> callCip30Wallet wallet walletAction
     Flint wallet -> callCip30Wallet wallet walletAction
     Lode wallet -> callCip30Wallet wallet walletAction
+    NuFi wallet -> callCip30Wallet wallet walletAction
     KeyWallet kw -> pure <$> keyWalletAction kw
 
 signData :: Address -> RawBytes -> QueryM (Maybe DataSignature)
@@ -720,10 +723,15 @@ getNetworkId :: QueryM NetworkId
 getNetworkId = asks $ _.config >>> _.networkId
 
 ownPubKeyHashes :: QueryM (Array PubKeyHash)
-ownPubKeyHashes = do
+ownPubKeyHashes = catMaybes <$> do
   getWalletAddresses >>= traverse \address -> do
-    liftM (error "Failed to convert Address to PubKeyHash") $
-      (addressPaymentCred >=> stakeCredentialToKeyHash >>> map wrap) address
+    paymentCred <-
+      liftM
+        ( error $
+            "Unable to get payment credential from Address"
+        ) $
+        addressPaymentCred address
+    pure $ stakeCredentialToKeyHash paymentCred <#> wrap
 
 ownPaymentPubKeyHashes :: QueryM (Array PaymentPubKeyHash)
 ownPaymentPubKeyHashes = map wrap <$> ownPubKeyHashes
@@ -786,55 +794,6 @@ instance Show ClientError where
       <> err
       <> ")"
 
--- | Apply `PlutusData` arguments to any type isomorphic to `PlutusScript`,
--- | returning an updated script with the provided arguments applied
-applyArgs
-  :: PlutusScript
-  -> Array PlutusData
-  -> QueryM (Either ClientError PlutusScript)
-applyArgs script args =
-  asks (_.ctlServerConfig <<< _.config) >>= case _ of
-    Nothing -> pure
-      $ Left
-      $
-        ClientOtherError
-          "The `ctl-server` service is required to call `applyArgs`. Please \
-          \provide a `Just` value in `ConfigParams.ctlServerConfig` and make \
-          \sure that the `ctl-server` service is running and available at the \
-          \provided host and port. The `ctl-server` packages can be obtained \
-          \from `overlays.ctl-server` defined in CTL's flake. Please see \
-          \`doc/runtime.md` in the CTL repository for more information"
-    Just config -> case traverse plutusDataToAeson args of
-      Nothing -> pure $ Left $ ClientEncodingError
-        "Failed to convert script args"
-      Just ps -> do
-        let
-          language :: Language
-          language = snd $ unwrap script
-
-          url :: String
-          url = mkHttpUrl config <</>> "apply-args"
-
-          reqBody :: Aeson
-          reqBody = encodeAeson
-            $ Object.fromFoldable
-                [ "script" /\ scriptToAeson script
-                , "args" /\ encodeAeson ps
-                ]
-        liftAff (postAeson url reqBody)
-          <#> map (PlutusScript <<< flip Tuple language) <<<
-            handleAffjaxResponse
-  where
-  plutusDataToAeson :: PlutusData -> Maybe Aeson
-  plutusDataToAeson =
-    map
-      ( encodeAeson
-          <<< byteArrayToHex
-          <<< Serialization.toBytes
-          <<< asOneOf
-      )
-      <<< Serialization.convertPlutusData
-
 -- Checks response status code and returns `ClientError` in case of failure,
 -- otherwise attempts to decode the result.
 --
@@ -895,15 +854,25 @@ listeners (WebSocket _ ls) = ls
 -- OgmiosWebSocket Setup and PrimOps
 --------------------------------------------------------------------------------
 
-mkDatumCacheWebSocketAff :: Logger -> ServerConfig -> Aff DatumCacheWebSocket
-mkDatumCacheWebSocketAff logger serverConfig = do
+mkDatumCacheWebSocketAff
+  :: Ref (Maybe DatumCacheWebSocket)
+  -> Logger
+  -> ServerConfig
+  -> Aff DatumCacheWebSocket
+mkDatumCacheWebSocketAff datumCacheWsRef logger serverConfig = do
   lens <- liftEffect $ mkDatumCacheWebSocketLens logger
-  makeAff $ mkServiceWebSocket lens (mkOgmiosDatumCacheWsUrl serverConfig)
+  makeAff $ \continue ->
+    mkServiceWebSocket lens (mkOgmiosDatumCacheWsUrl serverConfig) \res ->
+      res # either (\_ -> continue res)
+        (\ws -> Ref.write (Just ws) datumCacheWsRef *> continue res)
 
 mkOgmiosWebSocketAff
-  :: DatumCacheWebSocket -> Logger -> ServerConfig -> Aff OgmiosWebSocket
-mkOgmiosWebSocketAff datumCacheWebSocket logger serverConfig = do
-  lens <- liftEffect $ mkOgmiosWebSocketLens logger datumCacheWebSocket
+  :: Ref (Maybe DatumCacheWebSocket)
+  -> Logger
+  -> ServerConfig
+  -> Aff OgmiosWebSocket
+mkOgmiosWebSocketAff datumCacheWsRef logger serverConfig = do
+  lens <- liftEffect $ mkOgmiosWebSocketLens logger datumCacheWsRef
   makeAff $ mkServiceWebSocket lens (mkWsUrl serverConfig)
 
 mkServiceWebSocket
@@ -963,7 +932,7 @@ mkServiceWebSocket lens url continue = do
 -- | the request.
 resendPendingSubmitRequests
   :: OgmiosWebSocket
-  -> DatumCacheWebSocket
+  -> Ref (Maybe DatumCacheWebSocket)
   -> Logger
   -> (RequestBody -> Effect Unit)
   -> Dispatcher
@@ -1003,8 +972,11 @@ resendPendingSubmitRequests ogmiosWs odcWs logger sendRequest dispatcher pr = do
     retrySubmitTx <-
       if txInMempool then pure false
       else do
+        datumCacheWebSocket <- liftEffect do
+          let err = "handlePendingSubmitRequest: failed to access ODC WebSocket"
+          maybe (throw err) pure =<< Ref.read odcWs
         -- Check if the transaction was included in the block:
-        txConfirmed <- checkTxByHashAff odcWs logger txHash
+        txConfirmed <- checkTxByHashAff datumCacheWebSocket logger txHash
         log "Tx confirmed" txConfirmed txHash
         unless txConfirmed $ liftEffect do
           sendRequest requestBody
@@ -1061,9 +1033,9 @@ mkDatumCacheWebSocketLens logger = do
 
 mkOgmiosWebSocketLens
   :: Logger
-  -> DatumCacheWebSocket
+  -> Ref (Maybe DatumCacheWebSocket)
   -> Effect (MkServiceWebSocketLens OgmiosListeners)
-mkOgmiosWebSocketLens logger datumCacheWebSocket = do
+mkOgmiosWebSocketLens logger datumCacheWebSocketRef = do
   dispatcher <- newDispatcher
   pendingRequests <- newPendingRequests
   pendingSubmitTxRequests <- newPendingRequests
@@ -1105,7 +1077,7 @@ mkOgmiosWebSocketLens logger datumCacheWebSocket = do
       resendPendingRequests ws = do
         let sendRequest = _wsSend ws (logger Debug)
         Ref.read pendingRequests >>= traverse_ sendRequest
-        resendPendingSubmitRequests (ogmiosWebSocket ws) datumCacheWebSocket
+        resendPendingSubmitRequests (ogmiosWebSocket ws) datumCacheWebSocketRef
           logger
           sendRequest
           dispatcher

@@ -23,6 +23,15 @@ module.exports = {
 
   devServer: {
     port: 4008,
+    proxy: {
+      "/kupo": {
+        // `KUPO_HOST` env variable must be set to the base URL of the Kupo
+        // service, otherwise all requests to Kupo will fail.
+        target: process.env.KUPO_HOST || "http://localhost:1442",
+        changeOrigin: true,
+        pathRewrite: { "^/kupo": "" },
+      },
+    },
   },
 
   // we can add more entrypoints as needed
@@ -62,6 +71,8 @@ module.exports = {
       os: false,
       path: false,
       fs: false,
+      readline: false,
+      child_process: false,
     },
     alias: {
       // You should update this path to the location of your compiled scripts,

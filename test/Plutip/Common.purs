@@ -11,7 +11,7 @@ import Ctl.Internal.Plutip.Types (PlutipConfig)
 import Ctl.Internal.Types.RawBytes (hexToRawBytes)
 import Ctl.Internal.Wallet.Key (PrivateStakeKey)
 import Data.Log.Level (LogLevel(Trace))
-import Data.Maybe (Maybe(Just, Nothing), fromJust)
+import Data.Maybe (Maybe(Nothing), fromJust)
 import Data.Newtype (wrap)
 import Data.Time.Duration (Seconds(Seconds))
 import Data.UInt (fromInt) as UInt
@@ -35,8 +35,8 @@ config =
       , secure: false
       , path: Nothing
       }
-  , ctlServerConfig: Just
-      { port: UInt.fromInt 8083
+  , kupoConfig:
+      { port: UInt.fromInt 1443
       , host: "127.0.0.1"
       , secure: false
       , path: Nothing

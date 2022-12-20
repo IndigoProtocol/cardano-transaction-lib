@@ -21,14 +21,6 @@ rec {
       tag = "1.35.4";
     };
     ogmios = { port = 1337; };
-    # If you don't need to use `applyArgs` (i.e. you're not using parameterized
-    # scripts), you can disable CTL's server entirely in the runtime using
-    # `{ ctlServer.enable = false; }`. Currently we default to enabling it
-    # by default for backwards compatibility
-    ctlServer = {
-      enable = true;
-      port = 8081;
-    };
     postgres = {
       # User-facing port on host machine.
       # Can be set to null in order to not bind postgres port to host.
@@ -51,6 +43,13 @@ rec {
         startFromLast = false;
         filter = builtins.toJSON { const = true; };
       };
+    };
+    kupo = {
+      port = 1442;
+      since = "origin";
+      match = "*/*"; # matches Shelley addresses only
+      tag = "v2.2.0";
+      # TODO: Do we want to support connection through ogmios?
     };
     # Additional config that will be included in Arion's `docker-compose.raw`. This
     # corresponds directly to YAML that would be written in a `docker-compose` file,
@@ -105,6 +104,7 @@ rec {
         );
       nodeDbVol = "node-${config.network.name}-db";
       nodeIpcVol = "node-${config.network.name}-ipc";
+      kupoDbVol = "kupo-${config.network.name}-db";
       nodeSocketPath = "/ipc/node.socket";
       bindPort = port: "${toString port}:${toString port}";
       defaultServices = with config; {
@@ -128,6 +128,32 @@ rec {
               "${nodeSocketPath}"
               "--topology"
               "/config/topology.json"
+            ];
+          };
+        };
+        kupo = {
+          service = {
+            image = "cardanosolutions/kupo:${kupo.tag}";
+            ports = [ (bindPort kupo.port) ];
+            volumes = [
+              "${config.cardano-configurations}/network/${config.network.name}:/config"
+              "${nodeIpcVol}:/ipc"
+              "${kupoDbVol}:/kupo-db"
+            ];
+            command = [
+              "--node-config"
+              "/config/cardano-node/config.json"
+              "--node-socket"
+              "${nodeSocketPath}"
+              "--since"
+              "${kupo.since}"
+              "--defer-db-indexes"
+              "--match"
+              "${"${kupo.match}"}"
+              "--host"
+              "0.0.0.0"
+              "--workdir"
+              "kupo-db"
             ];
           };
         };
@@ -201,20 +227,6 @@ rec {
               ];
             };
           };
-      } // pkgs.lib.optionalAttrs ctlServer.enable {
-        ctl-server = {
-          service = {
-            useHostStore = true;
-            ports = [ (bindPort ctlServer.port) ];
-            command = [
-              "${pkgs.bash}/bin/sh"
-              "-c"
-              ''
-                ${pkgs.ctl-server}/bin/ctl-server --port ${toString ctlServer.port}
-              ''
-            ];
-          };
-        };
       };
     in
     {
@@ -223,6 +235,7 @@ rec {
           volumes = {
             "${nodeDbVol}" = { };
             "${nodeIpcVol}" = { };
+            "${kupoDbVol}" = { };
           };
         }
         config.extraDockerCompose;

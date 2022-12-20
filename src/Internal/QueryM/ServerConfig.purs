@@ -1,20 +1,20 @@
 module Ctl.Internal.QueryM.ServerConfig
   ( Host
   , ServerConfig
-  , defaultServerConfig
-  , defaultOgmiosWsConfig
   , defaultDatumCacheWsConfig
+  , defaultKupoServerConfig
+  , defaultOgmiosWsConfig
   , mkHttpUrl
-  , mkWsUrl
   , mkOgmiosDatumCacheWsUrl
   , mkServerUrl
+  , mkWsUrl
   ) where
 
 import Prelude
 
 import Ctl.Internal.Helpers ((<</>>))
 import Ctl.Internal.JsWebSocket (Url)
-import Data.Maybe (Maybe(Nothing), fromMaybe)
+import Data.Maybe (Maybe(Just, Nothing), fromMaybe)
 import Data.UInt (UInt)
 import Data.UInt as UInt
 
@@ -25,14 +25,6 @@ type ServerConfig =
   , host :: Host
   , secure :: Boolean
   , path :: Maybe String
-  }
-
-defaultServerConfig :: ServerConfig
-defaultServerConfig =
-  { port: UInt.fromInt 8081
-  , host: "localhost"
-  , secure: false
-  , path: Nothing
   }
 
 defaultOgmiosWsConfig :: ServerConfig
@@ -49,6 +41,14 @@ defaultDatumCacheWsConfig =
   , host: "localhost"
   , secure: false
   , path: Nothing
+  }
+
+defaultKupoServerConfig :: ServerConfig
+defaultKupoServerConfig =
+  { port: UInt.fromInt 4008
+  , host: "localhost"
+  , secure: false
+  , path: Just "kupo"
   }
 
 mkHttpUrl :: ServerConfig -> Url

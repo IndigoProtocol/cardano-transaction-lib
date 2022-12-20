@@ -10,23 +10,25 @@ import Control.Monad.Error.Class (liftMaybe)
 import Control.Monad.Except.Trans (ExceptT(ExceptT), except, runExceptT)
 import Control.Monad.Logger.Class (class MonadLogger)
 import Control.Monad.Logger.Class as Logger
+import Control.Parallel (parTraverse)
 import Ctl.Internal.BalanceTx.Collateral
   ( addTxCollateral
   , addTxCollateralReturn
   )
 import Ctl.Internal.BalanceTx.Constraints (BalanceTxConstraintsBuilder)
 import Ctl.Internal.BalanceTx.Constraints
-  ( _maxChangeOutputTokenQuantity
+  ( _changeAddress
+  , _maxChangeOutputTokenQuantity
   , _nonSpendableInputs
-  , _ownAddresses
+  , _srcAddresses
   ) as Constraints
 import Ctl.Internal.BalanceTx.Error
   ( Actual(Actual)
   , BalanceTxError
       ( CouldNotConvertScriptOutputToTxInput
+      , CouldNotGetChangeAddress
       , CouldNotGetCollateral
       , CouldNotGetUtxos
-      , CouldNotGetWalletAddress
       , ExUnitsEvaluationFailed
       , InsufficientTxInputs
       , ReindexRedeemersError
@@ -40,9 +42,9 @@ import Ctl.Internal.BalanceTx.Error
   ( Actual(Actual)
   , BalanceTxError
       ( CouldNotConvertScriptOutputToTxInput
+      , CouldNotGetChangeAddress
       , CouldNotGetCollateral
       , CouldNotGetUtxos
-      , CouldNotGetWalletAddress
       , InsufficientTxInputs
       , UtxoLookupFailedFor
       , UtxoMinAdaValueCalculationFailed
@@ -86,6 +88,7 @@ import Ctl.Internal.Cardano.Types.Transaction
   , _mint
   , _networkId
   , _outputs
+  , _referenceInputs
   , _withdrawals
   )
 import Ctl.Internal.Cardano.Types.Value
@@ -101,7 +104,7 @@ import Ctl.Internal.Cardano.Types.Value
   , valueToCoin'
   )
 import Ctl.Internal.QueryM (QueryM, getProtocolParameters)
-import Ctl.Internal.QueryM (getWalletAddresses) as QueryM
+import Ctl.Internal.QueryM (getChangeAddress, getWalletAddresses) as QueryM
 import Ctl.Internal.QueryM.Utxos
   ( filterLockedUtxos
   , getWalletCollateral
@@ -149,15 +152,14 @@ balanceTxWithConstraints unbalancedTx constraintsBuilder = do
       certsFee = getStakingBalance (unbalancedTx ^. _transaction')
         depositValuePerCert
 
-    ownAddrs <-
-      maybe (liftQueryM QueryM.getWalletAddresses) pure
-        =<< asksConstraints Constraints._ownAddresses
+    srcAddrs <-
+      asksConstraints Constraints._srcAddresses
+        >>= maybe (liftQueryM QueryM.getWalletAddresses) pure
 
-    changeAddr <- liftMaybe CouldNotGetWalletAddress $ Array.head ownAddrs
+    changeAddr <- getChangeAddress
 
-    utxos <- liftEitherQueryM $ traverse utxosAt ownAddrs <#>
-      traverse (note CouldNotGetUtxos) -- Maybe -> Either and unwrap UtxoM
-
+    utxos <- liftEitherQueryM $ parTraverse utxosAt srcAddrs <#>
+      traverse (note CouldNotGetUtxos)
         >>> map (foldr Map.union Map.empty) -- merge all utxos into one map
 
     unbalancedCollTx <-
@@ -182,6 +184,12 @@ balanceTxWithConstraints unbalancedTx constraintsBuilder = do
     runBalancer allUtxos availableUtxos changeAddr certsFee
       (unbalancedTx # _transaction' .~ unbalancedCollTx)
   where
+  getChangeAddress :: BalanceTxM Address
+  getChangeAddress =
+    liftMaybe CouldNotGetChangeAddress
+      =<< maybe (liftQueryM QueryM.getChangeAddress) (pure <<< Just)
+      =<< asksConstraints Constraints._changeAddress
+
   unbalancedTxWithNetworkId :: BalanceTxM Transaction
   unbalancedTxWithNetworkId = do
     let transaction = unbalancedTx ^. _transaction'
@@ -428,7 +436,9 @@ addTransactionInputs changeAddress utxos certsFee unbalancedTx = do
 
     spendableUtxos :: UtxoMap
     spendableUtxos =
-      Map.filterKeys (not <<< flip Set.member nonSpendableInputs) utxos
+      flip Map.filterKeys utxos \oref -> not $
+        Set.member oref nonSpendableInputs
+          || Set.member oref (txBody ^. _referenceInputs)
 
   newTxInputs <-
     except $ collectTransactionInputs txInputs spendableUtxos requiredInputValue

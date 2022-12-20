@@ -6,12 +6,14 @@ module Contract.Config
   , testnetFlintConfig
   , testnetEternlConfig
   , testnetLodeConfig
+  , testnetNuFiConfig
   , mainnetConfig
   , mainnetNamiConfig
   , mainnetGeroConfig
   , mainnetFlintConfig
   , mainnetEternlConfig
   , mainnetLodeConfig
+  , mainnetNuFiConfig
   , module Contract.Address
   , module Contract.Monad
   , module Data.Log.Level
@@ -32,8 +34,8 @@ import Ctl.Internal.QueryM.ServerConfig
   ( Host
   , ServerConfig
   , defaultDatumCacheWsConfig
+  , defaultKupoServerConfig
   , defaultOgmiosWsConfig
-  , defaultServerConfig
   )
 import Ctl.Internal.Wallet.Key
   ( PrivatePaymentKey(PrivatePaymentKey)
@@ -49,6 +51,7 @@ import Ctl.Internal.Wallet.Spec
       , ConnectToFlint
       , ConnectToEternl
       , ConnectToLode
+      , ConnectToNuFi
       )
   )
 import Data.Log.Level (LogLevel(Trace, Debug, Info, Warn, Error))
@@ -59,7 +62,7 @@ testnetConfig :: ConfigParams ()
 testnetConfig =
   { ogmiosConfig: defaultOgmiosWsConfig
   , datumCacheConfig: defaultDatumCacheWsConfig
-  , ctlServerConfig: Just defaultServerConfig
+  , kupoConfig: defaultKupoServerConfig
   , networkId: TestnetId
   , extraConfig: {}
   , walletSpec: Nothing
@@ -84,6 +87,9 @@ testnetEternlConfig = testnetConfig { walletSpec = Just ConnectToEternl }
 testnetLodeConfig :: ConfigParams ()
 testnetLodeConfig = testnetConfig { walletSpec = Just ConnectToLode }
 
+testnetNuFiConfig :: ConfigParams ()
+testnetNuFiConfig = testnetConfig { walletSpec = Just ConnectToNuFi }
+
 mainnetConfig :: ConfigParams ()
 mainnetConfig = testnetConfig { networkId = MainnetId }
 
@@ -101,3 +107,6 @@ mainnetEternlConfig = mainnetConfig { walletSpec = Just ConnectToEternl }
 
 mainnetLodeConfig :: ConfigParams ()
 mainnetLodeConfig = mainnetConfig { walletSpec = Just ConnectToLode }
+
+mainnetNuFiConfig :: ConfigParams ()
+mainnetNuFiConfig = mainnetConfig { walletSpec = Just ConnectToNuFi }
