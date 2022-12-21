@@ -32,6 +32,7 @@ import Ctl.Internal.BalanceTx.Error
       )
   , Expected(Expected)
   , ImpossibleError(Impossible)
+  , InvalidInContext(InvalidInContext)
   )
 import Ctl.Internal.Cardano.Types.Transaction (UtxoMap)
 import Ctl.Internal.Cardano.Types.Value (AssetClass(AssetClass), Coin, Value)
@@ -130,7 +131,10 @@ performMultiAssetSelection
   -> UtxoIndex
   -> Value
   -> m SelectionState
-performMultiAssetSelection strategy utxoIndex requiredValue =
+performMultiAssetSelection
+  strategy
+  utxoIndex
+  requiredValue =
   case requiredValue `Value.leq` availableValue of
     true ->
       runRoundRobinM (mkSelectionState utxoIndex) selectors
@@ -140,6 +144,7 @@ performMultiAssetSelection strategy utxoIndex requiredValue =
   balanceInsufficientError :: BalanceTxError
   balanceInsufficientError =
     BalanceInsufficientError (Expected requiredValue) (Actual availableValue)
+      (InvalidInContext mempty)
 
   availableValue :: Value
   availableValue = balance (utxoIndexUniverse utxoIndex)
