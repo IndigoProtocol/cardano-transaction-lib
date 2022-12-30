@@ -163,7 +163,7 @@
               name = "ctl-e2e-test";
               testMain = "Test.Ctl.E2E";
               env = { OGMIOS_FIXTURES = "${ogmiosFixtures}"; };
-              buildInputs = [ inputs.kupo-nixos.defaultPackage.${pkgs.system} ];
+              buildInputs = [ inputs.kupo-nixos.packages.${pkgs.system} ];
             };
             ctl-plutip-test = project.runPlutipTest {
               name = "ctl-plutip-test";
@@ -238,7 +238,7 @@
                 ogmios-datum-cache =
                   inputs.ogmios-datum-cache.defaultPackage.${system};
                 ogmios = ogmios.packages.${system}."ogmios:exe:ogmios";
-                kupo = inputs.kupo-nixos.packages.${system};
+                kupo = inputs.kupo-nixos.packages.${system}.kupo;
                 buildCtlRuntime = buildCtlRuntime final;
                 launchCtlRuntime = launchCtlRuntime final;
                 inherit cardano-configurations;
