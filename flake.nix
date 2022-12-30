@@ -238,7 +238,7 @@
                 ogmios-datum-cache =
                   inputs.ogmios-datum-cache.defaultPackage.${system};
                 ogmios = ogmios.packages.${system}."ogmios:exe:ogmios";
-                kupo = inputs.kupo-nixos.defaultPackage.${system};
+                kupo = inputs.kupo-nixos.packages.${system};
                 buildCtlRuntime = buildCtlRuntime final;
                 launchCtlRuntime = launchCtlRuntime final;
                 inherit cardano-configurations;
