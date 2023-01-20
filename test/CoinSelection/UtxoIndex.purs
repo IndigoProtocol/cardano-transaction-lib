@@ -1,19 +1,27 @@
 module Test.Ctl.CoinSelection.UtxoIndex (suite) where
 
+import Contract.Prelude
 import Prelude
 import Test.Ctl.CoinSelection.Arbitrary
 
+import Contract.Transaction (TransactionInput(..))
 import Ctl.Internal.CoinSelection.UtxoIndex
-  ( UtxoIndex
+  ( SelectionFilter(SelectAnyWith, SelectPairWith, SelectSingleton)
+  , UtxoIndex
   , UtxoIndexInvariantStatus(InvariantHolds)
-  )
-import Ctl.Internal.CoinSelection.UtxoIndex
-  ( buildUtxoIndex
+  , buildUtxoIndex
   , checkUtxoIndexInvariants
   , emptyUtxoIndex
+  , selectRandomWithFilter
   , utxoIndexDeleteEntry
+  , utxoIndexDisjoint
   , utxoIndexInsertEntry
+  , utxoIndexPartition
   ) as UtxoIndex
+import Ctl.Internal.CoinSelection.UtxoIndex
+  ( UtxoIndex
+  , UtxoIndexInvariantStatus(..)
+  )
 import Ctl.Internal.Test.TestPlanM (TestPlanM)
 import Data.Map (empty) as Map
 import Data.Newtype (unwrap)

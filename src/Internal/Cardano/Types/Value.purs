@@ -544,9 +544,6 @@ instance Show AssetClass where
 instance Hashable AssetClass where
   hash (AssetClass cs tn) = hash (cs /\ tn)
 
-instance Arbitrary AssetClass where
-  arbitrary = AssetClass <$> arbitrary <*> arbitrary
-
 assetToValue :: AssetClass -> BigInt -> Value
 assetToValue (AssetClass cs tn) quantity =
   mkValue mempty (mkSingletonNonAdaAsset cs tn quantity)
