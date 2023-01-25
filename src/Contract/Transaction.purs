@@ -77,7 +77,6 @@ import Ctl.Internal.BalanceTx.Error
       , CollateralReturnError
       , CollateralReturnMinAdaValueCalcError
       , ExUnitsEvaluationFailed
-      , InsufficientTxInputs
       , InsufficientUtxoBalanceToCoverAsset
       , ReindexRedeemersError
       , UtxoLookupFailedFor
