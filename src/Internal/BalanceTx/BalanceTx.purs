@@ -779,4 +779,3 @@ logTransactionWithChange message utxos mChangeOutputs unbalancedTx =
   in
     except (getInputValue utxos txBody)
       >>= (flip Logger.trace (message <> ":") <<< transactionInfo)
-
