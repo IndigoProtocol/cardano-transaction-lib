@@ -11,6 +11,7 @@ import Contract.Prelude
 import Contract.Address (PaymentPubKeyHash, StakePubKeyHash)
 import Contract.Log (logInfo')
 import Contract.Monad (Contract, liftContractM)
+import Contract.PlutusData (Datum)
 import Contract.Prim.ByteArray (byteArrayFromAscii)
 import Contract.Scripts (MintingPolicy)
 import Contract.Transaction

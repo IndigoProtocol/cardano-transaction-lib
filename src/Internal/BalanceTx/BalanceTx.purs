@@ -9,6 +9,7 @@ import Prelude
 import Control.Monad.Error.Class (catchError, liftMaybe, throwError)
 import Control.Monad.Except.Trans (ExceptT(ExceptT), except, runExceptT)
 import Control.Monad.Logger.Class (trace) as Logger
+import Control.Parallel (parTraverse)
 import Ctl.Internal.BalanceTx.CoinSelection
   ( SelectionState
   , SelectionStrategy

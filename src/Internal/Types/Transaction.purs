@@ -11,6 +11,7 @@ import Prelude
 import Aeson (class DecodeAeson, class EncodeAeson)
 import Ctl.Internal.FromData (class FromData, fromData)
 import Ctl.Internal.ToData (class ToData, toData)
+import Ctl.Internal.Types.BigNum (zero) as BigNum
 import Ctl.Internal.Types.ByteArray
   ( ByteArray
   , byteArrayFromIntArrayUnsafe
