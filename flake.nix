@@ -1,7 +1,7 @@
 {
   description = "cardano-transaction-lib";
 
-  nixConfig.bash-prompt = "\\[\\e[0m\\][\\[\\e[0;2m\\]nix-develop \\[\\e[0;1m\\]CTL \\[\\e[0;32m\\]\\w\\[\\e[0m\\]]\\[\\e[0m\\]$ \\[\\e[0m\\]";
+  nixConfig.bash-prompt = "\\[\\e[0m\\][\\[\\e[0;2m\\]nix-develop \\[\\e[0;1m\\]CTL@\\[\\033[33m\\]$(git rev-parse --abbrev-ref HEAD) \\[\\e[0;32m\\]\\w\\[\\e[0m\\]]\\[\\e[0m\\]$ \\[\\e[0m\\]";
 
   inputs = {
     nixpkgs.follows = "ogmios/nixpkgs";
@@ -12,8 +12,8 @@
     };
 
     ogmios.url = "github:mlabs-haskell/ogmios/a7687bc03b446bc74564abe1873fbabfa1aac196";
-    plutip.url = "github:mlabs-haskell/plutip/6e2d8a5b6b19a16ca6360a9731b218fcfb803256";
-    kupo-nixos.url = "github:mlabs-haskell/kupo-nixos/35096d5086215bd8ec60ca873f2dcf7ff2fbdee4";
+    plutip.url = "github:mlabs-haskell/plutip?rev=8d1795d9ac3f9c6f31381104b25c71576eeba009";
+    kupo-nixos.url = "github:mlabs-haskell/kupo-nixos/6f89cbcc359893a2aea14dd380f9a45e04c6aa67";
     kupo-nixos.inputs.kupo.follows = "kupo";
 
     kupo = {
@@ -21,11 +21,8 @@
       flake = false;
     };
 
-    ogmios-datum-cache.url = "github:mlabs-haskell/ogmios-datum-cache/862c6bfcb6110b8fe816e26b3bba105dfb492b24";
-
-    # ogmios and ogmios-datum-cache nixos modules (remove and replace with the above after merging and updating)
+    # ogmios nixos module (remove and replace with the above after merging and updating)
     ogmios-nixos.url = "github:mlabs-haskell/ogmios";
-    ogmios-datum-cache-nixos.url = "github:mlabs-haskell/ogmios-datum-cache/marton/nixos-module";
 
     cardano-node.follows = "ogmios-nixos/cardano-node";
     # for new environments like preview and preprod. TODO: remove this when cardano-node is updated
@@ -125,6 +122,7 @@
             packageLock = ./package-lock.json;
             shell = {
               withRuntime = true;
+              withChromium = false;
               shellHook = exportOgmiosFixtures;
               packageLockOnly = true;
               packages = with pkgs; [
@@ -163,7 +161,7 @@
               name = "ctl-e2e-test";
               testMain = "Test.Ctl.E2E";
               env = { OGMIOS_FIXTURES = "${ogmiosFixtures}"; };
-              buildInputs = [ inputs.kupo-nixos.packages.${pkgs.system} ];
+              buildInputs = [ inputs.kupo-nixos.packages.${pkgs.system}.kupo ];
             };
             ctl-plutip-test = project.runPlutipTest {
               name = "ctl-plutip-test";
@@ -235,8 +233,6 @@
               {
                 plutip-server =
                   inputs.plutip.packages.${system}."plutip:exe:plutip-server";
-                ogmios-datum-cache =
-                  inputs.ogmios-datum-cache.defaultPackage.${system};
                 ogmios = ogmios.packages.${system}."ogmios:exe:ogmios";
                 kupo = inputs.kupo-nixos.packages.${system}.kupo;
                 buildCtlRuntime = buildCtlRuntime final;
@@ -429,11 +425,7 @@
             services.ogmios.package =
               inputs.ogmios.packages.x86_64-linux."ogmios:exe:ogmios";
           }
-          inputs.ogmios-datum-cache-nixos.nixosModules.ogmios-datum-cache
-          {
-            services.ogmios-datum-cache.package =
-              inputs.ogmios-datum-cache.packages.x86_64-linux."ogmios-datum-cache";
-          }
+          inputs.kupo-nixos.nixosModules.kupo
           ./nix/test-nixos-configuration.nix
         ];
         specialArgs = {

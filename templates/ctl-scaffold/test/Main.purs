@@ -1,6 +1,6 @@
 -- | This module implements a test suite that uses Plutip to automate running
 -- | contracts in temporary, private networks.
-module Test.Scaffold.Main (main) where
+module Test.Scaffold.Main (main, suite) where
 
 import Contract.Prelude
 
@@ -11,11 +11,11 @@ import Contract.Test.Plutip
   , PlutipConfig
   , PlutipTest
   , testPlutipContracts
+  , withKeyWallet
   , withWallets
   )
 import Contract.Test.Utils (exitCode, interruptOnSignal)
 import Data.BigInt (fromInt) as BigInt
-import Data.Maybe (Maybe(Just))
 import Data.Posix.Signal (Signal(SIGINT))
 import Data.Time.Duration (Seconds(Seconds))
 import Data.UInt (fromInt) as UInt
@@ -25,7 +25,7 @@ import Effect.Aff
   , effectCanceler
   , launchAff
   )
-import Mote (test)
+import Mote (group, test)
 import Scaffold (contract)
 import Test.Spec.Runner (defaultConfig)
 
@@ -39,15 +39,17 @@ main = interruptOnSignal SIGINT =<< launchAff do
 
 suite :: TestPlanM PlutipTest Unit
 suite = do
-  test "Print PubKey" do
-    let
-      distribution :: InitialUTxOs
-      distribution =
-        [ BigInt.fromInt 5_000_000
-        , BigInt.fromInt 2_000_000_000
-        ]
-    withWallets distribution \_ -> do
-      contract
+  group "Project tests" do
+    test "Print PubKey" do
+      let
+        distribution :: InitialUTxOs
+        distribution =
+          [ BigInt.fromInt 5_000_000
+          , BigInt.fromInt 2_000_000_000
+          ]
+      withWallets distribution \wallet -> do
+        withKeyWallet wallet do
+          contract
 
 config :: PlutipConfig
 config =
@@ -60,38 +62,15 @@ config =
       , secure: false
       , path: Nothing
       }
-  , ogmiosDatumCacheConfig:
-      { port: UInt.fromInt 10000
-      , host: "127.0.0.1"
-      , secure: false
-      , path: Nothing
-      }
   , kupoConfig:
       { port: UInt.fromInt 1443
       , host: "127.0.0.1"
       , secure: false
       , path: Nothing
       }
-  , postgresConfig:
-      { host: "127.0.0.1"
-      , port: UInt.fromInt 5433
-      , user: "ctxlib"
-      , password: "ctxlib"
-      , dbname: "ctxlib"
-      }
   , customLogger: Nothing
   , suppressLogs: true
   , hooks: emptyHooks
-  -- ClusterConfig allows for fine tuning of the cluster. If you would like to
-  -- simply use the recommended default parameters use defaultClusterConfig
   , clusterConfig:
-      { slotLength: Just $ Seconds 0.1
-      -- Adjust the max transaction size. Useful for debugging with traces
-      , maxTxSize: Just $ UInt.fromInt 16384
-      -- Factor by with which to increase the standard maximum ex-Units
-      , increasedExUnits: Just $ UInt.fromInt 1
-      , epochSize: Just $ UInt.fromInt 30
-      -- Remove the constraints on collateral. Useful for debugging with traces
-      , noCollateral: false
-      }
+      { slotLength: Seconds 0.05 }
   }

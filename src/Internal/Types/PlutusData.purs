@@ -48,7 +48,7 @@ derive instance Generic PlutusData _
 instance Show PlutusData where
   show x = genericShow x
 
--- Ogmios Datum Cache Json format
+-- Based off Ogmios Datum Cache Json format, although we no longer use ODC
 instance DecodeAeson PlutusData where
   decodeAeson aeson = decodeConstr
     <|> decodeMap

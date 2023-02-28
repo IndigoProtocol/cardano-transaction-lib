@@ -12,7 +12,7 @@ import Ctl.Internal.FfiHelpers
   , containerHelper
   , maybeFfiHelper
   )
-import Ctl.Internal.Serialization.ToBytes (toBytes)
+import Ctl.Internal.Serialization.ToBytes (toBytes')
 import Ctl.Internal.Serialization.Types
   ( BigInt
   , ConstrPlutusData
@@ -66,7 +66,7 @@ convertPlutusDatumMap mp =
     entries :: Array (PlutusData /\ PlutusData)
     entries = mp <#> \(k /\ v) -> (convertPlutusData k /\ convertPlutusData v)
   in
-    _mkPlutusData_datumMap $ toBytes $ asOneOf $ _packDatumMap fst snd entries
+    _mkPlutusData_datumMap $ toBytes' $ asOneOf $ _packDatumMap fst snd entries
 
 convertPlutusInteger :: BigInt.BigInt -> PlutusData
 convertPlutusInteger n =

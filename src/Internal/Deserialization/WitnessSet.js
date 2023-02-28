@@ -59,10 +59,3 @@ exports.getRedeemerPlutusData = call("data");
 exports.getExUnits = call("ex_units");
 exports.getExUnitsMem = call("mem");
 exports.getExUnitsSteps = call("steps");
-exports._deserializeWitnessSet = maybe => bytes => {
-  try {
-    return maybe.just(lib.TransactionWitnessSet.from_bytes(bytes));
-  } catch (_) {
-    return maybe.nothing;
-  }
-};

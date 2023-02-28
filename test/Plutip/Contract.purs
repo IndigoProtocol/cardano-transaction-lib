@@ -8,12 +8,14 @@ import Contract.Address
   ( PaymentPubKeyHash(PaymentPubKeyHash)
   , PubKeyHash(PubKeyHash)
   , StakePubKeyHash
+  , getNetworkId
   , getWalletAddresses
   , getWalletCollateral
   , ownPaymentPubKeysHashes
   , ownStakePubKeysHashes
   , scriptHashAddress
   )
+import Contract.AuxiliaryData (setGeneralTxMetadata)
 import Contract.BalanceTxConstraints
   ( BalanceTxConstraintsBuilder
   , mustUseAdditionalUtxos
@@ -21,14 +23,12 @@ import Contract.BalanceTxConstraints
 import Contract.Chain (currentTime)
 import Contract.Hashing (datumHash, nativeScriptHash)
 import Contract.Log (logInfo')
-import Contract.Monad
-  ( Contract
-  , liftContractE
-  , liftContractM
-  , liftedE
-  , liftedM
-  , wrapContract
+import Contract.Metadata
+  ( GeneralTransactionMetadata(GeneralTransactionMetadata)
+  , TransactionMetadatum(Text)
+  , TransactionMetadatumLabel(TransactionMetadatumLabel)
   )
+import Contract.Monad (Contract, liftContractE, liftContractM, liftedE, liftedM)
 import Contract.PlutusData
   ( Datum(Datum)
   , PlutusData(Bytes, Integer, List)
@@ -44,14 +44,16 @@ import Contract.ScriptLookups as Lookups
 import Contract.Scripts
   ( ValidatorHash
   , applyArgs
+  , getScriptByHash
+  , getScriptsByHashes
   , mintingPolicyHash
   , validatorHash
   )
+import Contract.Test (ContractTest)
+import Contract.Test.Assert (runChecks)
 import Contract.Test.Plutip
   ( InitialUTxOs
   , InitialUTxOsWithStakeKey
-  , PlutipTest
-  , noWallet
   , withStakeKey
   , withWallets
   )
@@ -70,6 +72,7 @@ import Contract.Transaction
   , balanceTx
   , balanceTxWithConstraints
   , createAdditionalUtxos
+  , getTxMetadata
   , signTransaction
   , submit
   , submitTxFromConstraints
@@ -83,7 +86,7 @@ import Contract.Value (Coin(Coin), Value, coinToValue)
 import Contract.Value as Value
 import Contract.Wallet (getWalletUtxos, isWalletAvailable, withKeyWallet)
 import Control.Monad.Error.Class (try)
-import Control.Monad.Reader (asks)
+import Control.Monad.Trans.Class (lift)
 import Control.Parallel (parallel, sequential)
 import Ctl.Examples.AlwaysMints (alwaysMintsPolicy)
 import Ctl.Examples.AlwaysSucceeds as AlwaysSucceeds
@@ -153,10 +156,8 @@ import Data.Tuple.Nested (type (/\), (/\))
 import Data.UInt (UInt)
 import Effect.Class (liftEffect)
 import Effect.Exception (throw)
-import Mote (group, skip, test)
-import Mote.Monad (mapTest)
+import Mote (group, test)
 import Safe.Coerce (coerce)
-import Test.Ctl.AffInterface as AffInterface
 import Test.Ctl.Fixtures
   ( cip25MetadataFixture1
   , fullyAppliedScriptFixture
@@ -171,25 +172,19 @@ import Test.Ctl.Fixtures
   , unappliedScriptFixture
   )
 import Test.Ctl.Plutip.Common (privateStakeKey)
-import Test.Ctl.Plutip.Contract.NetworkId as NetworkId
 import Test.Ctl.Plutip.Utils (getLockedInputs, submitAndLog)
 import Test.Ctl.Plutip.UtxoDistribution (checkUtxoDistribution)
 import Test.Spec.Assertions (shouldEqual, shouldNotEqual, shouldSatisfy)
 
-suite :: TestPlanM PlutipTest Unit
+suite :: TestPlanM ContractTest Unit
 suite = do
-  group "Contract" do
-    flip mapTest AffInterface.suite
-      (noWallet <<< wrapContract)
-
-    NetworkId.suite
-
-    test "Collateral" do
+  group "Contract interface" do
+    test "Collateral selection: UTxO with lower amount is selected" do
       let
         distribution :: InitialUTxOs /\ InitialUTxOs
         distribution =
-          [ BigInt.fromInt 1_000_000_000
-          , BigInt.fromInt 2_000_000_000
+          [ BigInt.fromInt 10_000_000
+          , BigInt.fromInt 20_000_000
           ] /\
             [ BigInt.fromInt 2_000_000_000 ]
       withWallets distribution \(alice /\ bob) -> do
@@ -201,7 +196,7 @@ suite = do
                   { output: TransactionOutputWithRefScript { output } }
               ] -> do
               let amount = (unwrap output).amount
-              unless (amount == lovelaceValueOf (BigInt.fromInt 1_000_000_000))
+              unless (amount == lovelaceValueOf (BigInt.fromInt 10_000_000))
                 $ throw "Wrong UTxO selected as collateral"
             Just _ -> do
               -- not a bug, but unexpected
@@ -209,12 +204,12 @@ suite = do
         withKeyWallet bob do
           pure unit -- sign, balance, submit, etc.
 
-    test "Pkh2Pkh" do
+    test "Payment keyhash to payment keyhash transaction (Pkh2Pkh example)" do
       let
         distribution :: InitialUTxOs
         distribution =
-          [ BigInt.fromInt 1_000_000_000
-          , BigInt.fromInt 2_000_000_000
+          [ BigInt.fromInt 10_000_000
+          , BigInt.fromInt 20_000_000
           ]
       withWallets distribution \alice -> do
         checkUtxoDistribution distribution alice
@@ -223,68 +218,42 @@ suite = do
         stakePkh <- join <<< head <$> withKeyWallet alice ownStakePubKeysHashes
         withKeyWallet alice $ pkh2PkhContract pkh stakePkh
 
-    test "Pkh2Pkh with stake key" do
-      let
-        aliceUtxos =
-          [ BigInt.fromInt 2_000_000_000
-          , BigInt.fromInt 2_000_000_000
-          ]
-        distribution = withStakeKey privateStakeKey aliceUtxos
+    test
+      "Base Address to Base Address transaction (Pkh2Pkh example, but with stake keys)"
+      do
+        let
+          aliceUtxos =
+            [ BigInt.fromInt 20_000_000
+            , BigInt.fromInt 20_000_000
+            ]
+          distribution = withStakeKey privateStakeKey aliceUtxos
 
-      withWallets distribution \alice -> do
-        checkUtxoDistribution distribution alice
-        pkh <- liftedM "Failed to get PKH" $ head <$> withKeyWallet alice
-          ownPaymentPubKeysHashes
-        stakePkh <- join <<< head <$> withKeyWallet alice ownStakePubKeysHashes
-        stakePkh `shouldSatisfy` isJust
-        withKeyWallet alice $ pkh2PkhContract pkh stakePkh
+        withWallets distribution \alice -> do
+          checkUtxoDistribution distribution alice
+          pkh <- liftedM "Failed to get PKH" $ head <$> withKeyWallet alice
+            ownPaymentPubKeysHashes
+          stakePkh <- join <<< head <$> withKeyWallet alice
+            ownStakePubKeysHashes
+          stakePkh `shouldSatisfy` isJust
+          withKeyWallet alice $ pkh2PkhContract pkh stakePkh
 
-    test "parallel Pkh2Pkh" do
-      let
-        aliceUtxos =
-          [ BigInt.fromInt 1_000_000_000
-          , BigInt.fromInt 2_000_000_000
-          ]
-        bobUtxos =
-          [ BigInt.fromInt 1_000_000_000
-          , BigInt.fromInt 2_000_000_000
-          ]
+    test
+      "Payment key hash to payment key hash Tx: running two contracts in parallel (Pkh2Pkh example)"
+      do
+        let
+          aliceUtxos =
+            [ BigInt.fromInt 20_000_000
+            , BigInt.fromInt 20_000_000
+            ]
+          bobUtxos =
+            [ BigInt.fromInt 20_000_000
+            , BigInt.fromInt 20_000_000
+            ]
 
-        distribution :: InitialUTxOs /\ InitialUTxOs
-        distribution = aliceUtxos /\ bobUtxos
+          distribution :: InitialUTxOs /\ InitialUTxOs
+          distribution = aliceUtxos /\ bobUtxos
 
-      withWallets distribution \wallets@(alice /\ bob) -> do
-        checkUtxoDistribution distribution wallets
-        sequential ado
-          parallel $ withKeyWallet alice do
-            pkh <- liftedM "Failed to get PKH" $ head <$> withKeyWallet bob
-              ownPaymentPubKeysHashes
-            stakePkh <- join <<< head <$> withKeyWallet bob
-              ownStakePubKeysHashes
-            pkh2PkhContract pkh stakePkh
-          parallel $ withKeyWallet bob do
-            pkh <- liftedM "Failed to get PKH" $ head <$> withKeyWallet alice
-              ownPaymentPubKeysHashes
-            stakePkh <- join <<< head <$> withKeyWallet alice
-              ownStakePubKeysHashes
-            pkh2PkhContract pkh stakePkh
-          in unit
-
-    test "parallel Pkh2Pkh with stake keys" do
-      let
-        aliceUtxos =
-          [ BigInt.fromInt 1_000_000_000
-          , BigInt.fromInt 2_000_000_000
-          ]
-        bobUtxos =
-          [ BigInt.fromInt 1_000_000_000
-          , BigInt.fromInt 2_000_000_000
-          ]
-        distribution =
-          withStakeKey privateStakeKey aliceUtxos
-            /\ withStakeKey privateStakeKey bobUtxos
-      withWallets distribution \wallets@(alice /\ bob) ->
-        do
+        withWallets distribution \wallets@(alice /\ bob) -> do
           checkUtxoDistribution distribution wallets
           sequential ado
             parallel $ withKeyWallet alice do
@@ -301,32 +270,66 @@ suite = do
               pkh2PkhContract pkh stakePkh
             in unit
 
-    test "awaitTxConfirmedWithTimeout fails after timeout" do
+    test
+      "Base Address to Base Address hash Tx: running two contracts in parallel (Pkh2Pkh example)"
+      do
+        let
+          aliceUtxos =
+            [ BigInt.fromInt 1_000_000_000
+            , BigInt.fromInt 20_000_000
+            ]
+          bobUtxos =
+            [ BigInt.fromInt 1_000_000_000
+            , BigInt.fromInt 20_000_000
+            ]
+          distribution =
+            withStakeKey privateStakeKey aliceUtxos
+              /\ withStakeKey privateStakeKey bobUtxos
+        withWallets distribution \wallets@(alice /\ bob) ->
+          do
+            checkUtxoDistribution distribution wallets
+            sequential ado
+              parallel $ withKeyWallet alice do
+                pkh <- liftedM "Failed to get PKH" $ head <$> withKeyWallet bob
+                  ownPaymentPubKeysHashes
+                stakePkh <- join <<< head <$> withKeyWallet bob
+                  ownStakePubKeysHashes
+                pkh2PkhContract pkh stakePkh
+              parallel $ withKeyWallet bob do
+                pkh <- liftedM "Failed to get PKH" $ head <$> withKeyWallet
+                  alice
+                  ownPaymentPubKeysHashes
+                stakePkh <- join <<< head <$> withKeyWallet alice
+                  ownStakePubKeysHashes
+                pkh2PkhContract pkh stakePkh
+              in unit
+
+    test "Tx confirmation fails after timeout (awaitTxConfirmedWithTimeout)" do
       let
         distribution = withStakeKey privateStakeKey
           [ BigInt.fromInt 1_000_000_000 ]
       withWallets distribution \_ ->
         AwaitTxConfirmedWithTimeout.contract
 
-    test "NativeScript: require all signers" do
+    test "NativeScript (multisig) support: require all signers" do
       let
         distribution
           :: InitialUTxOs /\ InitialUTxOs /\ InitialUTxOs /\ InitialUTxOs
         distribution =
-          [ BigInt.fromInt 2_000_000_000
-          , BigInt.fromInt 2_000_000_000
+          [ BigInt.fromInt 20_000_000
+          , BigInt.fromInt 20_000_000
           ]
             /\
-              [ BigInt.fromInt 2_000_000_000
-              , BigInt.fromInt 2_000_000_000
+              [ BigInt.fromInt 20_000_000
+              , BigInt.fromInt 20_000_000
               ]
             /\
-              [ BigInt.fromInt 2_000_000_000
-              , BigInt.fromInt 2_000_000_000
+              [ BigInt.fromInt 20_000_000
+              , BigInt.fromInt 20_000_000
               ]
             /\
-              [ BigInt.fromInt 2_000_000_000
-              , BigInt.fromInt 2_000_000_000
+              [ BigInt.fromInt 20_000_000
+              , BigInt.fromInt 20_000_000
               ]
       withWallets distribution \(alice /\ bob /\ charlie /\ dan) ->
         do
@@ -367,7 +370,7 @@ suite = do
           -- Bob attempts to unlock and send Ada to Charlie
           withKeyWallet bob do
             -- First, he should find the transaction input where Ada is locked
-            networkId <- asks $ unwrap >>> _.config >>> _.networkId
+            networkId <- getNetworkId
             let
               nsAddr = nativeScriptHashEnterpriseAddress networkId nsHash
             nsAddrPlutus <- liftContractM "Unable to convert to Plutus address"
@@ -405,25 +408,25 @@ suite = do
             txSigned <- foldM signWithWallet tx [ alice, bob, charlie, dan ]
             submit txSigned >>= awaitTxConfirmed
 
-    test "NativeScript: NOfK (2)" do
+    test "NativeScript support: require N=2 of K=4 signers" do
       let
         distribution
           :: InitialUTxOs /\ InitialUTxOs /\ InitialUTxOs /\ InitialUTxOs
         distribution =
-          [ BigInt.fromInt 2_000_000_000
-          , BigInt.fromInt 2_000_000_000
+          [ BigInt.fromInt 50_000_000
+          , BigInt.fromInt 50_000_000
           ]
             /\
-              [ BigInt.fromInt 2_000_000_000
-              , BigInt.fromInt 2_000_000_000
+              [ BigInt.fromInt 50_000_000
+              , BigInt.fromInt 50_000_000
               ]
             /\
-              [ BigInt.fromInt 2_000_000_000
-              , BigInt.fromInt 2_000_000_000
+              [ BigInt.fromInt 50_000_000
+              , BigInt.fromInt 50_000_000
               ]
             /\
-              [ BigInt.fromInt 2_000_000_000
-              , BigInt.fromInt 2_000_000_000
+              [ BigInt.fromInt 50_000_000
+              , BigInt.fromInt 50_000_000
               ]
       withWallets distribution \(alice /\ bob /\ charlie /\ dan) ->
         do
@@ -465,7 +468,7 @@ suite = do
           -- Bob attempts to unlock and send Ada to Charlie
           withKeyWallet bob do
             -- First, he should find the transaction input where Ada is locked
-            networkId <- asks $ unwrap >>> _.config >>> _.networkId
+            networkId <- getNetworkId
             let
               nsAddr = nativeScriptHashEnterpriseAddress networkId nsHash
             nsAddrPlutus <- liftContractM "Unable to convert to Plutus address"
@@ -494,12 +497,12 @@ suite = do
             txSigned <- foldM signWithWallet tx [ dan ]
             submit txSigned >>= awaitTxConfirmed
 
-    test "AlwaysMints" do
+    test "An always-succeeding minting policy" do
       let
         distribution :: InitialUTxOs
         distribution =
           [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
+          , BigInt.fromInt 50_000_000
           ]
       withWallets distribution \alice -> do
         withKeyWallet alice do
@@ -522,12 +525,12 @@ suite = do
           bsTx <- signTransaction =<< liftedE (balanceTx ubTx)
           submitAndLog bsTx
 
-    test "mustProduceAtLeast success" do
+    test "mustProduceAtLeast spends native token" do
       let
         distribution :: InitialUTxOs
         distribution =
           [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
+          , BigInt.fromInt 50_000_000
           ]
       withWallets distribution \alice -> do
         withKeyWallet alice do
@@ -564,12 +567,12 @@ suite = do
           txHash' <- submitTxFromConstraints lookups' constraints'
           void $ awaitTxConfirmed txHash'
 
-    test "mustProduceAtLeast fail" do
+    test "mustProduceAtLeast fails to produce more tokens than there is" do
       let
         distribution :: InitialUTxOs
         distribution =
           [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
+          , BigInt.fromInt 50_000_000
           ]
       withWallets distribution \alice -> do
         withKeyWallet alice do
@@ -607,12 +610,12 @@ suite = do
           result <- balanceTx ubTx
           result `shouldSatisfy` isLeft
 
-    test "mustSpendAtLeast success" do
+    test "mustSpendAtLeast succeeds to spend" do
       let
         distribution :: InitialUTxOs
         distribution =
           [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
+          , BigInt.fromInt 50_000_000
           ]
       withWallets distribution \alice -> do
         withKeyWallet alice do
@@ -649,12 +652,12 @@ suite = do
           txHash' <- submitTxFromConstraints lookups' constraints'
           void $ awaitTxConfirmed txHash'
 
-    test "mustSpendAtLeast fail" do
+    test "mustSpendAtLeast fails to spend more token that there is" do
       let
         distribution :: InitialUTxOs
         distribution =
           [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
+          , BigInt.fromInt 50_000_000
           ]
       withWallets distribution \alice -> do
         withKeyWallet alice do
@@ -692,23 +695,24 @@ suite = do
           result <- balanceTx ubTx
           result `shouldSatisfy` isLeft
 
-    test "NativeScriptMints" do
+    test "Minting using NativeScript (multisig) as a policy" do
       let
         distribution :: InitialUTxOs
         distribution =
           [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
+          , BigInt.fromInt 50_000_000
           ]
       withWallets distribution \alice -> do
         withKeyWallet alice NativeScriptMints.contract
 
-    test "Datums" do
+    test "Getting datums by hashes" do
       withWallets unit \_ -> do
         let
           mkDatumHash :: String -> DataHash
           mkDatumHash = wrap <<< hexToByteArrayUnsafe
         -- Nothing is expected, because we are in an empty chain.
-        -- This test only checks for ability to connect to ODC
+        -- This test only checks for ability to connect to the datum-querying
+        -- backend.
         logInfo' <<< show =<< getDatumByHash
           ( mkDatumHash
               "42be572a6d9a8a2ec0df04f14b0d4fcbe4a7517d74975dfff914514f12316252"
@@ -731,7 +735,7 @@ suite = do
         distribution :: InitialUTxOs
         distribution =
           [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
+          , BigInt.fromInt 50_000_000
           ]
 
         datum1 :: Datum
@@ -744,7 +748,7 @@ suite = do
         datums = [ datum2, datum1 ]
 
       let
-        payToTest :: ValidatorHash -> Contract () TransactionHash
+        payToTest :: ValidatorHash -> Contract TransactionHash
         payToTest vhash = do
           let
             constraints =
@@ -770,7 +774,7 @@ suite = do
           logInfo' "Running GetDatums submittx"
           txId <- payToTest vhash
           awaitTxConfirmed txId
-          logInfo' "Tx submitted successfully, trying to fetch datum from ODC"
+          logInfo' "Tx submitted successfully, trying to fetch datum"
 
           let
             hash1 = datumHash datum1
@@ -778,22 +782,87 @@ suite = do
             hashes = map datumHash datums
 
           actualDatums1 <- getDatumsByHashes hashes
-          actualDatums1 `shouldEqual` Map.fromFoldable
-            [ hash1 /\ datum1
-            , hash2 /\ datum2
-            ]
+          actualDatums1 `shouldEqual`
+            ( Map.fromFoldable
+                [ hash1 /\ datum1
+                , hash2 /\ datum2
+                ]
+            )
           actualDatums2 <- getDatumsByHashesWithErrors hashes
-          actualDatums2 `shouldEqual` Map.fromFoldable
-            [ hash1 /\ Right datum1
-            , hash2 /\ Right datum2
+          actualDatums2 `shouldEqual`
+            ( Map.fromFoldable
+                [ hash1 /\ Right datum1
+                , hash2 /\ Right datum2
+                ]
+            )
+
+    test "GetScriptByHash" do
+      let
+        distribution :: InitialUTxOs
+        distribution = [ BigInt.fromInt 50_000_000 ]
+
+      withWallets distribution \alice -> do
+        withKeyWallet alice do
+          validator1 <- AlwaysSucceeds.alwaysSucceedsScript
+          validator2 <- alwaysSucceedsScriptV2
+          let
+            validatorRef1 = PlutusScriptRef $ unwrap validator1
+            validatorRef2 = PlutusScriptRef $ unwrap validator2
+            useScriptAndGetByHash validator vhash = do
+              txId <- AlwaysSucceeds.payToAlwaysSucceeds vhash
+              awaitTxConfirmed txId
+              -- Spending utxo, to make Kupo (used inside) see the script
+              AlwaysSucceeds.spendFromAlwaysSucceeds vhash validator txId
+              getScriptByHash $ unwrap vhash
+
+          result1 <- useScriptAndGetByHash validator1 (validatorHash validator1)
+          result2 <- useScriptAndGetByHash validator2 (validatorHash validator2)
+
+          -- Testing getScriptByHash
+          result1 `shouldEqual` (Right (Just validatorRef1))
+          result2 `shouldEqual` (Right (Just validatorRef2))
+
+          -- Testing getScriptsByHashes
+          let
+            scriptHash1 = unwrap (validatorHash validator1)
+            scriptHash2 = unwrap (validatorHash validator2)
+          results <- getScriptsByHashes [ scriptHash1, scriptHash2 ]
+          results `shouldEqual` Map.fromFoldable
+            [ (scriptHash1 /\ (Right (Just validatorRef1)))
+            , (scriptHash2 /\ (Right (Just validatorRef2)))
             ]
 
-    test "MintZeroToken" do
+    test "Getting transaction metadata" do
+      let
+        distribution :: InitialUTxOs
+        distribution = [ BigInt.fromInt 50_000_000 ]
+
+      withWallets distribution \alice -> do
+        withKeyWallet alice do
+          let
+            constraints :: Constraints.TxConstraints Void Void
+            constraints = mempty
+
+            lookups :: Lookups.ScriptLookups Void
+            lookups = mempty
+            givenMetadata = GeneralTransactionMetadata $ Map.fromFoldable
+              [ TransactionMetadatumLabel (BigInt.fromInt 8) /\ Text "foo" ]
+
+          ubTx <- liftedE $ Lookups.mkUnbalancedTx lookups constraints
+          ubTx' <- setGeneralTxMetadata ubTx givenMetadata
+          bsTx <- signTransaction =<< liftedE (balanceTx ubTx')
+          txId <- submit bsTx
+          awaitTxConfirmed txId
+
+          mMetadata <- getTxMetadata txId
+          mMetadata `shouldEqual` Right givenMetadata
+
+    test "Minting zero of a token fails" do
       let
         distribution :: InitialUTxOs
         distribution =
           [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
+          , BigInt.fromInt 50_000_000
           ]
 
       withWallets distribution \alice -> do
@@ -815,12 +884,12 @@ suite = do
           result <- Lookups.mkUnbalancedTx lookups constraints
           result `shouldSatisfy` isLeft
 
-    test "MintsMultipleTokens" do
+    test "Minting multiple tokens in a single transaction" do
       let
         distribution :: InitialUTxOs
         distribution =
           [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
+          , BigInt.fromInt 50_000_000
           ]
       withWallets distribution \alice -> do
         withKeyWallet alice do
@@ -854,53 +923,36 @@ suite = do
           bsTx <- signTransaction =<< liftedE (balanceTx ubTx)
           submitAndLog bsTx
 
-    test "SignMultiple" do
+    test "Multi-signature transaction" do
       let
         distribution :: InitialUTxOs
         distribution =
           [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 100_000_000
+          , BigInt.fromInt 50_000_000
           ]
       withWallets distribution \alice -> do
         checkUtxoDistribution distribution alice
         withKeyWallet alice signMultipleContract
 
-    test "SignMultiple with stake key" do
+    test "Multi-signature transaction with BaseAddresses" do
       let
         aliceUtxos =
           [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 100_000_000
+          , BigInt.fromInt 50_000_000
           ]
         distribution = withStakeKey privateStakeKey aliceUtxos
       withWallets distribution \alice -> do
         checkUtxoDistribution distribution alice
         withKeyWallet alice signMultipleContract
 
-    test "AlwaysSucceeds" do
-      let
-        distribution :: InitialUTxOs
-        distribution =
-          [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
-          ]
-      withWallets distribution \alice -> do
-        withKeyWallet alice do
-          validator <- AlwaysSucceeds.alwaysSucceedsScript
-          let vhash = validatorHash validator
-          logInfo' "Attempt to lock value"
-          txId <- AlwaysSucceeds.payToAlwaysSucceeds vhash
-          awaitTxConfirmed txId
-          logInfo' "Try to spend locked values"
-          AlwaysSucceeds.spendFromAlwaysSucceeds vhash validator txId
-
     test
-      "AlwaysSucceeds (with stake key to test `mustPayToPubKeyAddress`)"
+      "Locking & unlocking on an always succeeding script (AlwaysSucceeds example)"
       do
         let
-          distribution :: InitialUTxOsWithStakeKey
-          distribution = withStakeKey privateStakeKey
+          distribution :: InitialUTxOs
+          distribution =
             [ BigInt.fromInt 5_000_000
-            , BigInt.fromInt 2_000_000_000
+            , BigInt.fromInt 50_000_000
             ]
         withWallets distribution \alice -> do
           withKeyWallet alice do
@@ -912,18 +964,37 @@ suite = do
             logInfo' "Try to spend locked values"
             AlwaysSucceeds.spendFromAlwaysSucceeds vhash validator txId
 
-    test "currentTime" do
+    test
+      "AlwaysSucceeds example (with stake key to test `mustPayToPubKeyAddress`)"
+      do
+        let
+          distribution :: InitialUTxOsWithStakeKey
+          distribution = withStakeKey privateStakeKey
+            [ BigInt.fromInt 5_000_000
+            , BigInt.fromInt 50_000_000
+            ]
+        withWallets distribution \alice -> do
+          withKeyWallet alice do
+            validator <- AlwaysSucceeds.alwaysSucceedsScript
+            let vhash = validatorHash validator
+            logInfo' "Attempt to lock value"
+            txId <- AlwaysSucceeds.payToAlwaysSucceeds vhash
+            awaitTxConfirmed txId
+            logInfo' "Try to spend locked values"
+            AlwaysSucceeds.spendFromAlwaysSucceeds vhash validator txId
+
+    test "Query for current time and era summaries" do
       withWallets unit \_ -> do
         void $ currentTime
         void $ getEraSummaries >>= unwrap >>> traverse
           (getSlotLength >>> show >>> logInfo')
 
-    test "SendsToken" do
+    test "Mints and sends a token" do
       let
         distribution :: InitialUTxOs
         distribution =
           [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
+          , BigInt.fromInt 50_000_000
           ]
       withWallets distribution \alice -> do
         withKeyWallet alice SendsToken.contract
@@ -1039,7 +1110,7 @@ suite = do
         distribution :: InitialUTxOs
         distribution =
           [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
+          , BigInt.fromInt 50_000_000
           ]
       withWallets distribution \alice -> do
         withKeyWallet alice do
@@ -1051,69 +1122,98 @@ suite = do
           logInfo' "Try to spend locked values"
           InlineDatum.spendFromCheckDatumIsInline vhash validator txId
 
-    test "InlineDatum Read" do
-      let
-        distribution :: InitialUTxOs
-        distribution =
-          [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
-          ]
-      withWallets distribution \alice -> do
-        withKeyWallet alice do
-          validator <- InlineDatum.checkDatumIsInlineScript
-          let vhash = validatorHash validator
-          logInfo' "Attempt to lock value with inline datum"
-          txId <- InlineDatum.payToCheckDatumIsInline vhash
-          awaitTxConfirmed txId
-          logInfo' "Try to read inline datum"
-          InlineDatum.readFromCheckDatumIsInline vhash txId
+    group "CIP-32 InlineDatums" do
+      test "Use of CIP-32 InlineDatums" do
+        let
+          distribution :: InitialUTxOs
+          distribution =
+            [ BigInt.fromInt 5_000_000
+            , BigInt.fromInt 50_000_000
+            ]
+        withWallets distribution \alice -> do
+          withKeyWallet alice do
+            validator <- InlineDatum.checkDatumIsInlineScript
+            let vhash = validatorHash validator
+            logInfo' "Attempt to lock value with inline datum"
+            txId <- InlineDatum.payToCheckDatumIsInline vhash
+            awaitTxConfirmed txId
+            logInfo' "Try to spend locked values"
+            InlineDatum.spendFromCheckDatumIsInline vhash validator txId
 
-    test "InlineDatum Failure" do
-      let
-        distribution :: InitialUTxOs
-        distribution =
-          [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
-          ]
-      withWallets distribution \alice -> do
-        withKeyWallet alice do
-          validator <- InlineDatum.checkDatumIsInlineScript
-          let vhash = validatorHash validator
-          logInfo' "Attempt to lock value without inline datum"
-          txId <- InlineDatum.payToCheckDatumIsInlineWrong vhash
-          awaitTxConfirmed txId
-          logInfo' "Try to spend locked values"
-          eResult <- try $ InlineDatum.spendFromCheckDatumIsInline vhash
-            validator
-            txId
-          eResult `shouldSatisfy` isLeft
+      test "Use of CIP-30 InlineDatums without spending the UTxO (readonly)" do
+        let
+          distribution :: InitialUTxOs
+          distribution =
+            [ BigInt.fromInt 5_000_000
+            , BigInt.fromInt 50_000_000
+            ]
+        withWallets distribution \alice -> do
+          withKeyWallet alice do
+            validator <- InlineDatum.checkDatumIsInlineScript
+            let vhash = validatorHash validator
+            logInfo' "Attempt to lock value with inline datum"
+            txId <- InlineDatum.payToCheckDatumIsInline vhash
+            awaitTxConfirmed txId
+            logInfo' "Try to read inline datum"
+            InlineDatum.readFromCheckDatumIsInline vhash txId
 
-    test "InlineDatum Cannot Spend PlutusV1" do
-      let
-        distribution :: InitialUTxOs
-        distribution =
-          [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
-          ]
-      withWallets distribution \alice -> do
-        withKeyWallet alice do
-          validator <- AlwaysSucceeds.alwaysSucceedsScript
-          let vhash = validatorHash validator
-          logInfo' "Attempt to lock value at plutusv1 script with inline datum"
-          txId <- InlineDatum.payToCheckDatumIsInline vhash
-          awaitTxConfirmed txId
-          logInfo' "Try to spend locked values"
-          eResult <- try $ InlineDatum.spendFromCheckDatumIsInline vhash
-            validator
-            txId
-          eResult `shouldSatisfy` isLeft
+      test "InlineDatum spending fails because the datum was not set inline" do
+        let
+          distribution :: InitialUTxOs
+          distribution =
+            [ BigInt.fromInt 5_000_000
+            , BigInt.fromInt 50_000_000
+            ]
+        withWallets distribution \alice -> do
+          withKeyWallet alice do
+            validator <- InlineDatum.checkDatumIsInlineScript
+            let vhash = validatorHash validator
+            logInfo' "Attempt to lock value without inline datum"
+            txId <- InlineDatum.payToCheckDatumIsInlineWrong vhash
+            awaitTxConfirmed txId
+            logInfo' "Try to spend locked values"
+            eResult <- try $ InlineDatum.spendFromCheckDatumIsInline vhash
+              validator
+              txId
+            eResult `shouldSatisfy` isLeft
 
-    test "IncludeDatum" do
+      test "InlineDatum fails because PlutusV1 script is used" do
+        let
+          distribution :: InitialUTxOs
+          distribution =
+            [ BigInt.fromInt 5_000_000
+            , BigInt.fromInt 50_000_000
+            ]
+        withWallets distribution \alice -> do
+          withKeyWallet alice do
+            validator <- AlwaysSucceeds.alwaysSucceedsScript
+            let vhash = validatorHash validator
+            logInfo'
+              "Attempt to lock value at plutusv1 script with inline datum"
+            txId <- InlineDatum.payToCheckDatumIsInline vhash
+            awaitTxConfirmed txId
+            logInfo' "Try to spend locked values"
+            eResult <- try $ InlineDatum.spendFromCheckDatumIsInline vhash
+              validator
+              txId
+            eResult `shouldSatisfy` isLeft
+
+      test "Payment with inline datum" do
+        let
+          distribution :: InitialUTxOs
+          distribution =
+            [ BigInt.fromInt 5_000_000
+            , BigInt.fromInt 50_000_000
+            ]
+        withWallets distribution \alice ->
+          withKeyWallet alice PaysWithDatum.contract
+
+    test "Lock value at a script: validator that only accepts 42 as redeemer" do
       let
         distribution :: InitialUTxOs
         distribution =
           [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
+          , BigInt.fromInt 50_000_000
           ]
       withWallets distribution \alice -> do
         withKeyWallet alice do
@@ -1125,12 +1225,12 @@ suite = do
           logInfo' "Try to spend locked values"
           IncludeDatum.spendFromIncludeDatum vhash validator txId
 
-    test "AlwaysSucceeds PlutusV2" do
+    test "Always succeeding PlutusV2 script" do
       let
         distribution :: InitialUTxOs
         distribution =
           [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
+          , BigInt.fromInt 50_000_000
           ]
       withWallets distribution \alice -> do
         withKeyWallet alice do
@@ -1142,158 +1242,156 @@ suite = do
           logInfo' "Try to spend locked values"
           AlwaysSucceeds.spendFromAlwaysSucceeds vhash validator txId
 
-    test "AlwaysFails Ada Collateral Return" do
-      let
-        distribution :: InitialUTxOs /\ InitialUTxOs
-        distribution =
-          [ BigInt.fromInt 10_000_000
-          , BigInt.fromInt 2_000_000_000
-          ] /\ [ BigInt.fromInt 2_000_000_000 ]
-      withWallets distribution \(alice /\ seed) -> do
-        validator <- AlwaysFails.alwaysFailsScript
-        let vhash = validatorHash validator
-        txId <- withKeyWallet seed do
-          logInfo' "Attempt to lock value"
-          txId <- AlwaysFails.payToAlwaysFails vhash
-          awaitTxConfirmed txId
-          pure txId
-
-        withKeyWallet alice do
-          awaitTxConfirmed txId
-          logInfo' "Try to spend locked values"
-          balanceBefore <- fold <$> getWalletBalance
-          AlwaysFails.spendFromAlwaysFails vhash validator txId
-          balance <- fold <$> getWalletBalance
-          let
-            collateralLoss = Value.lovelaceValueOf $ BigInt.fromInt $ -5_000_000
-          balance `shouldEqual` (balanceBefore <> collateralLoss)
-
-    test "AlwaysFails Native Asset Collateral Return" do
-      let
-        distribution :: InitialUTxOs /\ InitialUTxOs
-        distribution =
-          [] /\ [ BigInt.fromInt 2_100_000_000 ]
-      withWallets distribution \(alice /\ seed) -> do
-        alicePkh /\ aliceStakePkh <- withKeyWallet alice do
-          pkh <- liftedM "Failed to get PKH" $ head <$> ownPaymentPubKeysHashes
-          stakePkh <- join <<< head <$> ownStakePubKeysHashes
-          pure $ pkh /\ stakePkh
-
-        mp <- alwaysMintsPolicy
-        cs <- liftContractM "Cannot get cs" $ Value.scriptCurrencySymbol mp
-        tn <- liftContractM "Cannot make token name"
-          $ byteArrayFromAscii "TheToken" >>= Value.mkTokenName
-        let asset = Value.singleton cs tn $ BigInt.fromInt 50
-
-        validator <- AlwaysFails.alwaysFailsScript
-        let vhash = validatorHash validator
-
-        txId <- withKeyWallet seed do
-          logInfo' "Minting asset to Alice"
-          let
-            constraints :: Constraints.TxConstraints Void Void
-            constraints = Constraints.mustMintValue (asset <> asset)
-              <> mustPayToPubKeyStakeAddress alicePkh aliceStakePkh
-                (asset <> (Value.lovelaceValueOf $ BigInt.fromInt 10_000_000))
-              <> mustPayToPubKeyStakeAddress alicePkh aliceStakePkh
-                ( asset <>
-                    (Value.lovelaceValueOf $ BigInt.fromInt 2_000_000_000)
-                )
-
-            lookups :: Lookups.ScriptLookups Void
-            lookups = Lookups.mintingPolicy mp
-
-          ubTx <- liftedE $ Lookups.mkUnbalancedTx lookups constraints
-          bsTx <- signTransaction =<< liftedE (balanceTx ubTx)
-          submit bsTx >>= awaitTxConfirmed
-
-          logInfo' "Attempt to lock value"
-          txId <- AlwaysFails.payToAlwaysFails vhash
-          awaitTxConfirmed txId
-          pure txId
-
-        withKeyWallet alice do
-          awaitTxConfirmed txId
-          logInfo' "Try to spend locked values"
-          AlwaysFails.spendFromAlwaysFails vhash validator txId
-
-    test "ReferenceScripts" do
-      let
-        distribution :: InitialUTxOs
-        distribution =
-          [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
-          ]
-      withWallets distribution \alice ->
-        withKeyWallet alice ReferenceScripts.contract
-
-    test
-      "ReferenceScripts (with StakeKey, testing `mustPayToScriptAddressWithScriptRef`)"
-      do
+    group "CIP-40 Collateral Output" do
+      test "Always failing script triggers Collateral Return (ADA-only)" do
         let
-          distribution :: InitialUTxOsWithStakeKey
-          distribution = withStakeKey privateStakeKey
+          distribution :: InitialUTxOs /\ InitialUTxOs
+          distribution =
+            [ BigInt.fromInt 10_000_000
+            , BigInt.fromInt 50_000_000
+            ] /\ [ BigInt.fromInt 50_000_000 ]
+        withWallets distribution \(alice /\ seed) -> do
+          validator <- AlwaysFails.alwaysFailsScript
+          let vhash = validatorHash validator
+          txId <- withKeyWallet seed do
+            logInfo' "Attempt to lock value"
+            txId <- AlwaysFails.payToAlwaysFails vhash
+            awaitTxConfirmed txId
+            pure txId
+
+          withKeyWallet alice do
+            awaitTxConfirmed txId
+            logInfo' "Try to spend locked values"
+            balanceBefore <- fold <$> getWalletBalance
+            AlwaysFails.spendFromAlwaysFails vhash validator txId
+            balance <- fold <$> getWalletBalance
+            let
+              collateralLoss = Value.lovelaceValueOf $ BigInt.fromInt $
+                -5_000_000
+            balance `shouldEqual` (balanceBefore <> collateralLoss)
+
+      test "AlwaysFails script triggers Native Asset Collateral Return (tokens)"
+        do
+          let
+            distribution :: InitialUTxOs /\ InitialUTxOs
+            distribution =
+              [] /\ [ BigInt.fromInt 2_100_000_000 ]
+          withWallets distribution \(alice /\ seed) -> do
+            alicePkh /\ aliceStakePkh <- withKeyWallet alice do
+              pkh <- liftedM "Failed to get PKH" $ head <$>
+                ownPaymentPubKeysHashes
+              stakePkh <- join <<< head <$> ownStakePubKeysHashes
+              pure $ pkh /\ stakePkh
+
+            mp <- alwaysMintsPolicy
+            cs <- liftContractM "Cannot get cs" $ Value.scriptCurrencySymbol mp
+            tn <- liftContractM "Cannot make token name"
+              $ byteArrayFromAscii "TheToken" >>= Value.mkTokenName
+            let asset = Value.singleton cs tn $ BigInt.fromInt 50
+
+            validator <- AlwaysFails.alwaysFailsScript
+            let vhash = validatorHash validator
+
+            txId <- withKeyWallet seed do
+              logInfo' "Minting asset to Alice"
+              let
+                constraints :: Constraints.TxConstraints Void Void
+                constraints = Constraints.mustMintValue (asset <> asset)
+                  <> mustPayToPubKeyStakeAddress alicePkh aliceStakePkh
+                    ( asset <>
+                        (Value.lovelaceValueOf $ BigInt.fromInt 10_000_000)
+                    )
+                  <> mustPayToPubKeyStakeAddress alicePkh aliceStakePkh
+                    ( asset <>
+                        (Value.lovelaceValueOf $ BigInt.fromInt 50_000_000)
+                    )
+
+                lookups :: Lookups.ScriptLookups Void
+                lookups = Lookups.mintingPolicy mp
+
+              ubTx <- liftedE $ Lookups.mkUnbalancedTx lookups constraints
+              bsTx <- signTransaction =<< liftedE (balanceTx ubTx)
+              submit bsTx >>= awaitTxConfirmed
+
+              logInfo' "Attempt to lock value"
+              txId <- AlwaysFails.payToAlwaysFails vhash
+              awaitTxConfirmed txId
+              pure txId
+
+            withKeyWallet alice do
+              awaitTxConfirmed txId
+              logInfo' "Try to spend locked values"
+              AlwaysFails.spendFromAlwaysFails vhash validator txId
+
+    group "CIP-33 Reference Scripts" do
+      test "Use reference scripts for spending" do
+        let
+          distribution :: InitialUTxOs
+          distribution =
             [ BigInt.fromInt 5_000_000
-            , BigInt.fromInt 2_000_000_000
+            , BigInt.fromInt 50_000_000
             ]
         withWallets distribution \alice ->
           withKeyWallet alice ReferenceScripts.contract
 
-    test "ReferenceInputs" do
-      let
-        distribution :: InitialUTxOs
-        distribution =
-          [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
-          ]
-      withWallets distribution \alice ->
-        withKeyWallet alice ReferenceInputs.contract
+      test
+        "Use reference scripts for spending (with Base Address, testing `mustPayToScriptAddressWithScriptRef`)"
+        do
+          let
+            distribution :: InitialUTxOsWithStakeKey
+            distribution = withStakeKey privateStakeKey
+              [ BigInt.fromInt 5_000_000
+              , BigInt.fromInt 50_000_000
+              ]
+          withWallets distribution \alice ->
+            withKeyWallet alice ReferenceScripts.contract
 
-    test "ReferenceInputsAndScripts" do
-      let
-        distribution :: InitialUTxOs
-        distribution =
-          [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
-          ]
-      withWallets distribution \alice ->
-        withKeyWallet alice ReferenceInputsAndScripts.contract
+    group "CIP-31 Reference Inputs" do
+      test "Use reference inputs" do
+        let
+          distribution :: InitialUTxOs
+          distribution =
+            [ BigInt.fromInt 5_000_000
+            , BigInt.fromInt 50_000_000
+            ]
+        withWallets distribution \alice ->
+          withKeyWallet alice ReferenceInputs.contract
 
-    test "OneShotMinting" do
+      test "Use reference inputs and reference scripts at the same time" do
+        let
+          distribution :: InitialUTxOs
+          distribution =
+            [ BigInt.fromInt 5_000_000
+            , BigInt.fromInt 50_000_000
+            ]
+        withWallets distribution \alice ->
+          withKeyWallet alice ReferenceInputsAndScripts.contract
+
+    test "One-Shot Minting example" do
       let
         distribution :: InitialUTxOs
         distribution =
           [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
+          , BigInt.fromInt 50_000_000
           ]
       withWallets distribution \alice ->
         withKeyWallet alice OneShotMinting.contract
 
-    test "OneShotMinting PlutusV2" do
+    test "One-Shot Minting using PlutusV2 scripts" do
       let
         distribution :: InitialUTxOs
         distribution =
           [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
+          , BigInt.fromInt 50_000_000
           ]
       withWallets distribution \alice ->
         withKeyWallet alice OneShotMintingV2.contract
 
-    test "PaysWithDatum" do
-      let
-        distribution :: InitialUTxOs
-        distribution =
-          [ BigInt.fromInt 5_000_000
-          , BigInt.fromInt 2_000_000_000
-          ]
-      withWallets distribution \alice ->
-        withKeyWallet alice PaysWithDatum.contract
-
-    test "Examples.ContractTestUtils" do
+    test "Check assertion utilities (ContractTestUtils example)" do
       let
         initialUtxos :: InitialUTxOs
         initialUtxos =
-          [ BigInt.fromInt 2_000_000_000, BigInt.fromInt 2_000_000_000 ]
+          [ BigInt.fromInt 50_000_000, BigInt.fromInt 50_000_000 ]
 
         distribution :: InitialUTxOs /\ InitialUTxOs
         distribution = initialUtxos /\ initialUtxos
@@ -1307,22 +1405,27 @@ suite = do
 
         tn <- mkTokenName "TheToken"
 
-        withKeyWallet alice $ ContractTestUtils.contract $
-          ContractTestUtils.ContractParams
-            { receiverPkh
-            , receiverSkh
-            , adaToSend: BigInt.fromInt 5_000_000
-            , mintingPolicy
-            , tokensToMint: cs /\ tn /\ one /\ unit
-            , datumToAttach: wrap $ Integer $ BigInt.fromInt 42
-            , txMetadata: cip25MetadataFixture1
-            }
+        withKeyWallet alice do
+          let
+            params =
+              { receiverPkh
+              , receiverSkh
+              , adaToSend: BigInt.fromInt 5_000_000
+              , mintingPolicy
+              , tokensToMint: cs /\ tn /\ one /\ unit
+              , datumToAttach: wrap $ Integer $ BigInt.fromInt 42
+              , txMetadata: cip25MetadataFixture1
+              }
 
-    test "Examples.BalanceTxConstraints" do
+          checks <- ContractTestUtils.mkChecks params
+          void $ runChecks checks $ lift do
+            ContractTestUtils.mkContract params
+
+    test "Transaction balancer constraints (BalanceTxConstraints example)" do
       let
         initialUtxos :: InitialUTxOs
         initialUtxos =
-          [ BigInt.fromInt 2_000_000_000, BigInt.fromInt 2_000_000_000 ]
+          [ BigInt.fromInt 50_000_000, BigInt.fromInt 50_000_000 ]
 
         distribution :: InitialUTxOs /\ InitialUTxOs
         distribution = initialUtxos /\ initialUtxos
@@ -1332,8 +1435,11 @@ suite = do
           BalanceTxConstraintsExample.ContractParams
             { aliceKeyWallet: alice, bobKeyWallet: bob }
 
-    group "Evaluation with additional UTxOs and tx chaining" do
-      test "Examples.TxChaining" $
+    -- FIXME These tests never require additionalUtxos to succeed. They do
+    -- not invoke a script.
+    -- https://github.com/Plutonomicon/cardano-transaction-lib/issues/1392
+    group "Evaluation with additional UTxOs and Tx chaining" do
+      test "Tx chain submits (TxChaining example)" $
         let
           distribution :: InitialUTxOs
           distribution = [ BigInt.fromInt 2_500_000 ]
@@ -1344,7 +1450,7 @@ suite = do
       -- TODO
       -- investigate why this test failed with `valueNotConserved` error
       -- see https://github.com/Plutonomicon/cardano-transaction-lib/issues/1174
-      skip $ test "Evaluation with additional UTxOs with native scripts" do
+      test "Evaluation with additional UTxOs with native scripts" do
         let
           distribution :: InitialUTxOs
           distribution =
@@ -1558,7 +1664,7 @@ suite = do
               awaitTxConfirmed txId0
               awaitTxConfirmed txId1
 
-    group "applyArgs" do
+    group "Application of arguments to parameterized scripts" do
       test "returns the same script when called without args" do
         withWallets unit \_ -> do
           result <- liftContractE $ applyArgs
@@ -1585,13 +1691,13 @@ suite = do
             args
           result `shouldEqual` (unwrap fullyAppliedScriptFixture)
 
-    group "CIP-30 mock" do
+    group "CIP-30 mock interface" do
       test "Wallet cleanup" do
         let
           distribution :: InitialUTxOs
           distribution =
             [ BigInt.fromInt 1_000_000_000
-            , BigInt.fromInt 2_000_000_000
+            , BigInt.fromInt 50_000_000
             ]
         withWallets distribution \alice -> do
           try (liftEffect $ isWalletAvailable NamiWallet) >>= flip shouldSatisfy
@@ -1625,12 +1731,12 @@ suite = do
           try (liftEffect $ isWalletAvailable NuFiWallet) >>= flip shouldSatisfy
             isLeft
 
-      test "Collateral selection" do
+      test "Collateral selection returns UTxO with smaller amount" do
         let
           distribution :: InitialUTxOs
           distribution =
             [ BigInt.fromInt 1_000_000_000
-            , BigInt.fromInt 2_000_000_000
+            , BigInt.fromInt 50_000_000
             ]
         withWallets distribution \alice -> do
           withCip30Mock alice MockNami do
@@ -1642,18 +1748,18 @@ suite = do
                 ] -> do
                 let amount = (unwrap output).amount
                 unless
-                  (amount == lovelaceValueOf (BigInt.fromInt 1_000_000_000))
+                  (amount == lovelaceValueOf (BigInt.fromInt 50_000_000))
                   $ throw "Wrong UTxO selected as collateral"
               Just _ -> do
-                -- not a bug, but unexpected
-                throw "More than one UTxO in collateral"
+                throw $ "More than one UTxO in collateral. " <>
+                  "Not a bug, but unexpected in this test, please update it."
 
       test "Get own UTxOs" do
         let
           distribution :: InitialUTxOs
           distribution =
             [ BigInt.fromInt 1_000_000_000
-            , BigInt.fromInt 2_000_000_000
+            , BigInt.fromInt 50_000_000
             ]
         withWallets distribution \alice -> do
           utxos <- withCip30Mock alice MockNami do
@@ -1665,7 +1771,7 @@ suite = do
           distribution :: InitialUTxOs
           distribution =
             [ BigInt.fromInt 1_000_000_000
-            , BigInt.fromInt 2_000_000_000
+            , BigInt.fromInt 50_000_000
             ]
         withWallets distribution \alice -> do
           mockAddress <- withCip30Mock alice MockNami do
@@ -1676,12 +1782,12 @@ suite = do
             getWalletAddresses
           mockAddress `shouldEqual` kwAddress
 
-      test "Pkh2Pkh" do
+      test "Payment key hash to payment key hash Tx" do
         let
           distribution :: InitialUTxOs
           distribution =
             [ BigInt.fromInt 1_000_000_000
-            , BigInt.fromInt 2_000_000_000
+            , BigInt.fromInt 50_000_000
             ]
         withWallets distribution \alice -> do
           withCip30Mock alice MockNami do
@@ -1690,37 +1796,24 @@ suite = do
             stakePkh <- join <<< head <$> ownStakePubKeysHashes
             pkh2PkhContract pkh stakePkh
 
-      test "GetWalletBalance" do
+      test "getWalletBalance works" do
         let
           distribution :: InitialUTxOs
           distribution =
             [ BigInt.fromInt 1_000_000_000
-            , BigInt.fromInt 2_000_000_000
+            , BigInt.fromInt 50_000_000
             ]
         withWallets distribution \alice -> do
           withKeyWallet alice do
             getWalletBalance >>= flip shouldSatisfy
-              ( eq $ Just $ coinToValue $ Coin $ BigInt.fromInt 1000 *
-                  BigInt.fromInt 3_000_000
+              ( eq $ Just $ coinToValue $ Coin $ BigInt.fromInt 1_050_000_000
               )
           withCip30Mock alice MockNami do
             getWalletBalance >>= flip shouldSatisfy
-              ( eq $ Just $ coinToValue $ Coin $ BigInt.fromInt 1000 *
-                  BigInt.fromInt 3_000_000
+              ( eq $ Just $ coinToValue $ Coin $ BigInt.fromInt 1_050_000_000
               )
 
-      test "CIP-30 utilities" do
-        let
-          distribution :: InitialUTxOs
-          distribution =
-            [ BigInt.fromInt 1_000_000_000
-            , BigInt.fromInt 2_000_000_000
-            ]
-        withWallets distribution \alice -> do
-          withCip30Mock alice MockNami do
-            Cip30.contract
-
-      test "getWalletBalance" do
+      test "getWalletBalance works (2)" do
         let
           distribution :: InitialUTxOs
           distribution =
@@ -1732,29 +1825,41 @@ suite = do
           withCip30Mock alice MockNami do
             getWalletBalance >>= flip shouldSatisfy
               (eq $ Just $ coinToValue $ Coin $ BigInt.fromInt 8_000_000)
-  group "Plutus Crypto" do
-    test "ECDSA" do
+
+      test "CIP-30 utilities" do
+        let
+          distribution :: InitialUTxOs
+          distribution =
+            [ BigInt.fromInt 1_000_000_000
+            , BigInt.fromInt 50_000_000
+            ]
+        withWallets distribution \alice -> do
+          withCip30Mock alice MockNami do
+            Cip30.contract
+
+  group "CIP-49 Plutus Crypto Primitives" do
+    test "ECDSA: a script that checks a signature works" do
       let
         distribution :: InitialUTxOs
         distribution =
           [ BigInt.fromInt 1_000_000_000
-          , BigInt.fromInt 2_000_000_000
+          , BigInt.fromInt 50_000_000
           ]
       withWallets distribution \alice -> do
         withKeyWallet alice do
           ECDSA.contract
-    test "Schnorr" do
+    test "Schnorr: a script that checks a signature works" do
       let
         distribution :: InitialUTxOs
         distribution =
           [ BigInt.fromInt 1_000_000_000
-          , BigInt.fromInt 2_000_000_000
+          , BigInt.fromInt 50_000_000
           ]
       withWallets distribution \alice -> do
         withKeyWallet alice do
           Schnorr.contract
 
-signMultipleContract :: forall (r :: Row Type). Contract r Unit
+signMultipleContract :: Contract Unit
 signMultipleContract = do
   pkh <- liftedM "Failed to get own PKH" $ head <$> ownPaymentPubKeysHashes
   stakePkh <- join <<< head <$> ownStakePubKeysHashes
@@ -1783,10 +1888,9 @@ signMultipleContract = do
     liftEffect $ throw "locked inputs map is not empty"
 
 pkh2PkhContract
-  :: forall (r :: Row Type)
-   . PaymentPubKeyHash
+  :: PaymentPubKeyHash
   -> Maybe StakePubKeyHash
-  -> Contract r Unit
+  -> Contract Unit
 pkh2PkhContract pkh stakePkh = do
   let
     constraints :: Constraints.TxConstraints Void Void

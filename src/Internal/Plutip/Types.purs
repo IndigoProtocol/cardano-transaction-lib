@@ -2,12 +2,7 @@ module Ctl.Internal.Plutip.Types
   ( ClusterStartupParameters
   , ErrorMessage
   , FilePath
-  , InitialUTxOs
-  , InitialUTxODistribution
-  , InitialUTxOsWithStakeKey(InitialUTxOsWithStakeKey)
   , PlutipConfig
-  , ClusterConfig
-  , PostgresConfig
   , ClusterStartupRequest(ClusterStartupRequest)
   , PrivateKeyResponse(PrivateKeyResponse)
   , ClusterStartupFailureReason
@@ -21,8 +16,6 @@ module Ctl.Internal.Plutip.Types
       )
   , StopClusterRequest(StopClusterRequest)
   , StopClusterResponse(StopClusterSuccess, StopClusterFailure)
-  , UtxoAmount
-  , defaultClusterConfig
   ) where
 
 import Prelude
@@ -37,117 +30,62 @@ import Aeson
   , toStringifiedNumbersJson
   , (.:)
   )
+import Ctl.Internal.Contract.Hooks (Hooks)
 import Ctl.Internal.Deserialization.Keys (privateKeyFromBytes)
-import Ctl.Internal.QueryM (Hooks)
-import Ctl.Internal.QueryM.ServerConfig (ServerConfig)
 import Ctl.Internal.Serialization.Types (PrivateKey)
+import Ctl.Internal.ServerConfig (ServerConfig)
+import Ctl.Internal.Test.UtxoDistribution (InitialUTxODistribution)
 import Ctl.Internal.Types.ByteArray (hexToByteArray)
 import Ctl.Internal.Types.RawBytes (RawBytes(RawBytes))
-import Ctl.Internal.Wallet.Key (PrivateStakeKey)
-import Data.BigInt (BigInt)
 import Data.Either (Either(Left), note)
 import Data.Generic.Rep (class Generic)
 import Data.Log.Level (LogLevel)
 import Data.Log.Message (Message)
-import Data.Maybe (Maybe(Nothing))
-import Data.Newtype (class Newtype, unwrap)
+import Data.Maybe (Maybe)
+import Data.Newtype (class Newtype)
 import Data.Show.Generic (genericShow)
 import Data.String as String
-import Data.Time.Duration (Seconds)
+import Data.Time.Duration (Seconds(Seconds))
 import Data.UInt (UInt)
 import Effect.Aff (Aff)
 import Partial.Unsafe (unsafePartial)
 
+-- | A config that is used to run tests on Plutip clusters.
+-- | Note that the test suite starts the services on the specified ports.
+-- | It does not expect them to be running.
 type PlutipConfig =
   { host :: String
   , port :: UInt
   , logLevel :: LogLevel
   -- Server configs are used to deploy the corresponding services:
   , ogmiosConfig :: ServerConfig
-  , ogmiosDatumCacheConfig :: ServerConfig
   , kupoConfig :: ServerConfig
-  -- Should be synchronized with `defaultConfig.postgres` in `flake.nix`
-  , postgresConfig :: PostgresConfig
   , customLogger :: Maybe (LogLevel -> Message -> Aff Unit)
   , suppressLogs :: Boolean
   , hooks :: Hooks
-  , clusterConfig :: ClusterConfig
-  }
-
-type ClusterConfig =
-  { slotLength :: Maybe Seconds
-  -- Adjust the max transaction size. Useful for debugging with traces
-  , maxTxSize :: Maybe UInt
-  -- Factor by which to increase the Max ex-units of a cluster
-  , increasedExUnits :: Maybe UInt
-  , epochSize :: Maybe UInt
-  , noCollateral :: Boolean
-  }
-
-defaultClusterConfig :: ClusterConfig
-defaultClusterConfig =
-  { slotLength: Nothing
-  , maxTxSize: Nothing
-  , increasedExUnits: Nothing
-  , epochSize: Nothing
-  , noCollateral: false
-  }
-
-type PostgresConfig =
-  { host :: String
-  , port :: UInt
-  , user :: String
-  , password :: String
-  , dbname :: String
+  , clusterConfig ::
+      { slotLength :: Seconds }
   }
 
 type FilePath = String
 
 type ErrorMessage = String
 
--- | UTxO amount in Lovelaces
-type UtxoAmount = BigInt
-
-type InitialUTxOs = Array UtxoAmount
-
-data InitialUTxOsWithStakeKey =
-  InitialUTxOsWithStakeKey PrivateStakeKey InitialUTxOs
-
-type InitialUTxODistribution = Array InitialUTxOs
-
-newtype ClusterStartupRequest =
-  ClusterStartupRequest
-    { keysToGenerate :: InitialUTxODistribution
-    , epochSize :: Maybe UInt
-    , slotLength :: Maybe Seconds
-    , maxTxSize :: Maybe UInt
-    , increasedExUnits :: Maybe UInt
-    , noCollateral :: Boolean
-    }
+newtype ClusterStartupRequest = ClusterStartupRequest
+  { keysToGenerate :: InitialUTxODistribution
+  , epochSize :: UInt
+  , slotLength :: Seconds
+  }
 
 instance EncodeAeson ClusterStartupRequest where
   encodeAeson
     ( ClusterStartupRequest
-        { keysToGenerate
-        , epochSize
-        , slotLength
-        , maxTxSize
-        , increasedExUnits
-        , noCollateral
-        }
-    ) =
-
-    let
-      sl = (unsafePartial partialFiniteNumber <<< unwrap) <$> slotLength
-    in
-      encodeAeson
-        { keysToGenerate
-        , epochSize
-        , slotLength: sl
-        , maxTxSize
-        , increasedExUnits
-        , noCollateral
-        }
+        { keysToGenerate, epochSize, slotLength: Seconds slotLength }
+    ) = encodeAeson
+    { keysToGenerate
+    , epochSize
+    , slotLength: unsafePartial partialFiniteNumber slotLength
+    }
 
 newtype PrivateKeyResponse = PrivateKeyResponse PrivateKey
 

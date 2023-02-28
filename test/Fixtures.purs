@@ -72,6 +72,7 @@ module Test.Ctl.Fixtures
   , witnessSetFixture3
   , witnessSetFixture3Value
   , witnessSetFixture4
+  , ed25519KeyHash1
   ) where
 
 import Prelude
@@ -177,10 +178,6 @@ import Ctl.Internal.Types.ByteArray
 import Ctl.Internal.Types.Int as Int
 import Ctl.Internal.Types.OutputDatum (OutputDatum(NoOutputDatum, OutputDatum))
 import Ctl.Internal.Types.PlutusData as PD
-import Ctl.Internal.Types.RawBytes
-  ( hexToRawBytesUnsafe
-  , rawBytesFromIntArrayUnsafe
-  )
 import Ctl.Internal.Types.RedeemerTag (RedeemerTag(Spend))
 import Ctl.Internal.Types.RewardAddress (RewardAddress(RewardAddress))
 import Ctl.Internal.Types.Scripts
@@ -225,13 +222,13 @@ txOutputFixture1 =
             keyHashCredential $ unsafePartial $ fromJust
               $ ed25519KeyHashFromBytes
               -- $ T.Bech32 "hstk_1rsf0q0q77t5nttxrtmpwd7tvv58a80a686t92pgy65ekz0s8ncu"
-              $ hexToRawBytesUnsafe
+              $ hexToByteArrayUnsafe
                   "1c12f03c1ef2e935acc35ec2e6f96c650fd3bfba3e96550504d53361"
         , paymentCred:
             keyHashCredential $ unsafePartial $ fromJust
               $ ed25519KeyHashFromBytes
               -- "hbas_1xranhpfej50zdup5jy995dlj9juem9x36syld8wm465hz92acfp"
-              $ hexToRawBytesUnsafe
+              $ hexToByteArrayUnsafe
                   "30fb3b8539951e26f034910a5a37f22cb99d94d1d409f69ddbaea971"
         }
     , amount: Value (Coin $ BigInt.fromInt 0) mempty
@@ -925,7 +922,7 @@ utxoFixture1' =
                 , paymentCred: keyHashCredential $ unsafePartial $ fromJust
                     $ ed25519KeyHashFromBytes
                     $
-                      rawBytesFromIntArrayUnsafe
+                      byteArrayFromIntArrayUnsafe
                         [ 243
                         , 63
                         , 250
@@ -958,7 +955,7 @@ utxoFixture1' =
                 , delegationCred: keyHashCredential $ unsafePartial $ fromJust
                     $ ed25519KeyHashFromBytes
                     $
-                      ( rawBytesFromIntArrayUnsafe
+                      ( byteArrayFromIntArrayUnsafe
                           [ 57
                           , 3
                           , 16
@@ -1199,7 +1196,7 @@ ed25519KeyHashFixture1 =
   -- $ Bech32 "hstk_1rsf0q0q77t5nttxrtmpwd7tvv58a80a686t92pgy65ekz0s8ncu"
   unsafePartial $ fromJust
     $ ed25519KeyHashFromBytes
-    $ hexToRawBytesUnsafe
+    $ hexToByteArrayUnsafe
         "1c12f03c1ef2e935acc35ec2e6f96c650fd3bfba3e96550504d53361"
 
 ed25519KeyHashFixture2 :: Ed25519KeyHash
@@ -1207,7 +1204,7 @@ ed25519KeyHashFixture2 =
   -- "hbas_1xranhpfej50zdup5jy995dlj9juem9x36syld8wm465hz92acfp"
   unsafePartial $ fromJust
     $ ed25519KeyHashFromBytes
-    $ hexToRawBytesUnsafe
+    $ hexToByteArrayUnsafe
         "30fb3b8539951e26f034910a5a37f22cb99d94d1d409f69ddbaea971"
 
 nativeScriptFixture1 :: NativeScript
@@ -1238,11 +1235,11 @@ keyHashBaseAddress { payment, stake } = baseAddressToAddress $ baseAddress
   , delegationCred:
       keyHashCredential $ unsafePartial $ fromJust $ ed25519KeyHashFromBytes
         -- $ T.Bech32 "hstk_1rsf0q0q77t5nttxrtmpwd7tvv58a80a686t92pgy65ekz0s8ncu"
-        $ hexToRawBytesUnsafe stake
+        $ hexToByteArrayUnsafe stake
   , paymentCred:
       keyHashCredential $ unsafePartial $ fromJust $ ed25519KeyHashFromBytes
         -- "hbas_1xranhpfej50zdup5jy995dlj9juem9x36syld8wm465hz92acfp"
-        $ hexToRawBytesUnsafe payment
+        $ hexToByteArrayUnsafe payment
   }
 
 plutusDataFixture1 :: PD.PlutusData
@@ -1315,7 +1312,7 @@ plutusDataFixture8Bytes' = hexToByteArrayUnsafe
 
 scriptHashFromString :: String -> ScriptHash
 scriptHashFromString s = unsafePartial $ fromJust $ scriptHashFromBytes $
-  hexToRawBytesUnsafe s
+  hexToByteArrayUnsafe s
 
 scriptHash1 :: ScriptHash
 scriptHash1 = scriptHashFromString

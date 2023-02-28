@@ -1,9 +1,9 @@
 -- | This module contains everything needed for `Contract` testing in Plutip
 -- | environment.
 module Contract.Test.Plutip
-  ( module X
-  , testPlutipContracts
-  , testPlutipContracts'
+  ( testPlutipContracts
+  , module X
+  , PlutipTest
   ) where
 
 import Prelude
@@ -11,34 +11,26 @@ import Prelude
 import Contract.Monad (runContractInEnv) as X
 import Contract.Wallet (withKeyWallet) as X
 import Ctl.Internal.Plutip.Server
-  ( PlutipTest
-  , PlutipTestPlan
-  , groupPlutipTestPlans
-  , noWallet
-  , runPlutipContract
-  , sameWallets
+  ( runPlutipContract
   , withPlutipContractEnv
+  ) as X
+import Ctl.Internal.Plutip.Server (testPlutipContracts) as Server
+import Ctl.Internal.Plutip.Types (PlutipConfig)
+import Ctl.Internal.Plutip.Types
+  ( PlutipConfig
+  ) as X
+import Ctl.Internal.Test.ContractTest (ContractTest)
+import Ctl.Internal.Test.ContractTest (ContractTest) as Server
+import Ctl.Internal.Test.ContractTest
+  ( noWallet
   , withWallets
   ) as X
-import Ctl.Internal.Plutip.Server
-  ( PlutipTest
-  , PlutipTestPlan
-  , testPlutipContracts
-  , testPlutipContracts'
-  ) as Server
-import Ctl.Internal.Plutip.Types
-  ( ClusterConfig
+import Ctl.Internal.Test.UtxoDistribution
+  ( class UtxoDistribution
   , InitialUTxODistribution
   , InitialUTxOs
-  , InitialUTxOsWithStakeKey
-  , PlutipConfig
-  , PostgresConfig
+  , InitialUTxOsWithStakeKey(InitialUTxOsWithStakeKey)
   , UtxoAmount
-  , defaultClusterConfig
-  ) as X
-import Ctl.Internal.Plutip.Types (PlutipConfig)
-import Ctl.Internal.Plutip.UtxoDistribution
-  ( class UtxoDistribution
   , withStakeKey
   ) as X
 import Effect.Aff (Aff)
@@ -47,13 +39,9 @@ import Mote (MoteT)
 -- | Run `Contract`s in tests in a single Plutip instance.
 testPlutipContracts
   :: PlutipConfig
-  -> MoteT Aff Server.PlutipTest Aff Unit
+  -> MoteT Aff Server.ContractTest Aff Unit
   -> MoteT Aff (Aff Unit) Aff Unit
 testPlutipContracts = Server.testPlutipContracts
 
--- | Run `Contract`s in a test plan with a single Plutip instance.
-testPlutipContracts'
-  :: PlutipConfig
-  -> Server.PlutipTestPlan
-  -> MoteT Aff (Aff Unit) Aff Unit
-testPlutipContracts' = Server.testPlutipContracts'
+-- | Type synonym for backwards compatibility.
+type PlutipTest = ContractTest

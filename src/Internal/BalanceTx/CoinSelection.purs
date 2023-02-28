@@ -9,20 +9,18 @@ module Ctl.Internal.BalanceTx.CoinSelection
   ( SelectionState(SelectionState)
   , SelectionStrategy(SelectionStrategyMinimal, SelectionStrategyOptimal)
   , _leftoverUtxos
+  , empty
+  , fromIndexFiltered
   , mkSelectionState
   , performMultiAssetSelection
   , runRoundRobinM -- Exported for tests
   , selectedInputs
   , selectUtxo
   , selectRandomWithPriority
-  , empty
-  , mkSelectionState
-  , fromIndexFiltered
   ) where
 
 import Prelude
 
-import Control.Bind (bindFlipped)
 import Control.Monad.Error.Class (class MonadThrow, throwError)
 import Ctl.Internal.BalanceTx.Error
   ( Actual(Actual)
