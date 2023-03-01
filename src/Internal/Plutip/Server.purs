@@ -7,6 +7,7 @@ module Ctl.Internal.Plutip.Server
   , checkPlutipServer
   , stopChildProcessWithPort
   , testPlutipContracts
+  , testPlutipContracts'
   ) where
 
 import Prelude
@@ -150,7 +151,14 @@ testPlutipContracts
   -> TestPlanM ContractTest Unit
   -> TestPlanM (Aff Unit) Unit
 testPlutipContracts plutipCfg tp = do
-  ContractTestPlan runContractTestPlan <- lift $ execDistribution tp
+  contractTestPlan <- lift $ execDistribution tp
+  testPlutipContracts' plutipCfg contractTestPlan
+
+testPlutipContracts'
+  :: PlutipConfig
+  -> ContractTestPlan
+  -> TestPlanM (Aff Unit) Unit
+testPlutipContracts' plutipCfg (ContractTestPlan runContractTestPlan) = do
   runContractTestPlan \distr tests -> do
     cleanupRef <- liftEffect $ Ref.new mempty
     bracket (startPlutipContractEnv plutipCfg distr cleanupRef)
