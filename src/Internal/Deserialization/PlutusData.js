@@ -8,12 +8,17 @@ if (typeof BROWSER_RUNTIME != "undefined" && BROWSER_RUNTIME) {
 }
 lib = require("@mlabs-haskell/csl-gc-wrapper")(lib);
 
+const plutusDataAs = what => helper => data => {
+  const res = data["as_" + what]();
+  return res == null ? helper.nothing : helper.just(res);
+};
+
 exports._convertPlutusData = handle => pd => {
   switch (pd.kind()) {
     case lib.PlutusDataKind.ConstrPlutusData:
       return handle.constr(pd.as_constr_plutus_data());
     case lib.PlutusDataKind.Map:
-      return handle.map(pd.as_map());
+      return handle.map(pd);
     case lib.PlutusDataKind.List:
       return handle.list(pd.as_list());
     case lib.PlutusDataKind.Integer:
