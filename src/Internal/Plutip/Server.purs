@@ -81,7 +81,7 @@ import Data.Foldable (sum)
 import Data.HTTP.Method as Method
 import Data.Log.Level (LogLevel)
 import Data.Log.Message (Message)
-import Data.Maybe (Maybe(Nothing, Just), maybe)
+import Data.Maybe (Maybe(Nothing, Just), fromMaybe, maybe)
 import Data.Newtype (over, unwrap, wrap)
 import Data.String.CodeUnits (indexOf) as String
 import Data.String.Pattern (Pattern(Pattern))
@@ -415,7 +415,8 @@ startPlutipCluster cfg keysToGenerate = do
                 $ ClusterStartupRequest
                     { keysToGenerate
                     , slotLength: cfg.clusterConfig.slotLength
-                    , epochSize
+                    , epochSize: fromMaybe epochSize
+                        cfg.clusterConfig.epochSizeOverride
                     }
             , responseFormat = Affjax.ResponseFormat.string
             , headers = [ Header.ContentType (wrap "application/json") ]

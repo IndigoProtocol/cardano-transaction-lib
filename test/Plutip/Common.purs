@@ -7,7 +7,7 @@ import Prelude
 
 import Contract.Config (emptyHooks)
 import Contract.Wallet (privateKeyFromBytes)
-import Ctl.Internal.Plutip.Types(PlutipConfig)
+import Ctl.Internal.Plutip.Types (PlutipConfig)
 import Ctl.Internal.Types.RawBytes (hexToRawBytes)
 import Ctl.Internal.Wallet.Key (PrivateStakeKey)
 import Data.Log.Level (LogLevel(Trace))
@@ -39,7 +39,9 @@ config =
   , customLogger: Nothing
   , hooks: emptyHooks
   , clusterConfig:
-      { slotLength: Seconds 0.1 }
+      { slotLength: Seconds 0.1
+      , epochSizeOverride: Nothing
+      }
   }
 
 privateStakeKey :: PrivateStakeKey
