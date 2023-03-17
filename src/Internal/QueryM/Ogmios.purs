@@ -422,6 +422,7 @@ newtype MempoolTransaction = MempoolTransaction
   }
 
 derive instance Generic MempoolTransaction _
+derive instance Newtype MempoolTransaction _
 instance Show MempoolTransaction where
   show = genericShow
 
@@ -447,6 +448,7 @@ newtype MempoolTxBody = MempoolTxBody
   }
 
 derive instance Generic MempoolTxBody _
+derive instance Newtype MempoolTxBody _
 instance Show MempoolTxBody where
   show = genericShow
 
