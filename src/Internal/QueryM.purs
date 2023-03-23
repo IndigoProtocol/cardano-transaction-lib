@@ -1,54 +1,52 @@
 -- | CTL query layer monad
 module Ctl.Internal.QueryM
-  ( module ExportDispatcher
-  , module ExportServerConfig
-  , ClientError
-      ( ClientHttpError
-      , ClientHttpResponseError
-      , ClientDecodeJsonError
-      , ClientEncodingError
-      , ClientOtherError
-      )
+  ( ClientError(..)
   , ClusterSetup
   , DatumCacheListeners
   , DatumCacheWebSocket
   , DefaultQueryEnv
+  , Hooks
   , ListenerSet
   , Logger
   , OgmiosListeners
   , OgmiosWebSocket
-  , QueryConfig
-  , QueryM
   , ParQueryM
-  , QueryMExtended(QueryMExtended)
+  , QueryConfig
   , QueryEnv
+  , QueryM
+  , QueryMExtended(..)
   , QueryRuntime
   , SubmitTxListenerSet
-  , WebSocket(WebSocket)
-  , Hooks
+  , WebSocket(..)
+  , acquireMempoolSnapshotAff
   , allowError
+  , callCip30Wallet
+  , defaultMessageListener
+  , emptyHooks
   , evaluateTxOgmios
   , getChainTip
+  , getChangeAddress
   , getDatumByHash
   , getDatumsByHashes
   , getDatumsByHashesWithErrors
   , getLogger
-  , getUnusedAddresses
-  , getChangeAddress
-  , getRewardAddresses
+  , getNetworkId
   , getProtocolParameters
   , getProtocolParametersAff
-  , getWalletAddresses
+  , getRewardAddresses
+  , getUnusedAddresses
   , getWallet
+  , getWalletAddresses
   , handleAffjaxResponse
   , liftQueryM
   , listeners
-  , postAeson
-  , mkDatumCacheWebSocketAff
+  , mempoolSnapshotHasTxAff
+  , mempoolSnapshotNextTxAff
+  , mempoolSnapshotSizeAndCapacityAff
   , mkDatumCacheRequest
+  , mkDatumCacheWebSocketAff
   , mkListenerSet
   , mkLogger
-  , defaultMessageListener
   , mkOgmiosRequest
   , mkOgmiosRequestAff
   , mkOgmiosWebSocketAff
@@ -56,22 +54,24 @@ module Ctl.Internal.QueryM
   , mkRequest
   , mkRequestAff
   , mkWalletBySpec
+  , module ExportDispatcher
+  , module ExportServerConfig
   , ownPaymentPubKeyHashes
   , ownStakePubKeysHashes
+  , postAeson
+  , releaseMempoolAff
   , runQueryM
-  , runQueryMWithSettings
   , runQueryMInRuntime
+  , runQueryMWithSettings
   , scriptToAeson
   , signData
   , stopQueryRuntime
   , submitTxOgmios
   , underlyingWebSocket
-  , withMWalletAff
   , withMWallet
+  , withMWalletAff
+  , withMempoolSnapshot
   , withQueryRuntime
-  , callCip30Wallet
-  , getNetworkId
-  , emptyHooks
   ) where
 
 import Prelude
@@ -642,6 +642,36 @@ mempoolSnapshotHasTxAff ogmiosWs logger ms =
   mkOgmiosRequestAff ogmiosWs logger (Ogmios.mempoolSnapshotHasTxCall ms)
     _.mempoolHasTx
 
+mempoolSnapshotSizeAndCapacityAff
+  :: OgmiosWebSocket
+  -> Logger
+  -> Ogmios.MempoolSnapshotAcquired
+  -> Aff Ogmios.MempoolSizeAndCapacity
+mempoolSnapshotSizeAndCapacityAff ogmiosWs logger ms =
+  mkOgmiosRequestAff ogmiosWs logger (Ogmios.mempoolSnpashotSizeAndCapacityCall ms)
+    _.mempoolSizeAndCapcity
+    unit
+
+releaseMempoolAff
+  :: OgmiosWebSocket
+  -> Logger
+  -> Ogmios.MempoolSnapshotAcquired
+  -> Aff Ogmios.MempoolReleased
+releaseMempoolAff ogmiosWs logger ms =
+  mkOgmiosRequestAff ogmiosWs logger (Ogmios.releaseMempoolCall ms)
+    _.releaseMempool
+    unit
+
+mempoolSnapshotNextTxAff
+  :: OgmiosWebSocket
+  -> Logger
+  -> Ogmios.MempoolSnapshotAcquired
+  -> Aff (Maybe Ogmios.MempoolTransaction)
+mempoolSnapshotNextTxAff ogmiosWs logger ms =
+  mkOgmiosRequestAff ogmiosWs logger (Ogmios.mempoolSnapshotNextTxCall ms)
+    _.mempoolNextTx
+    unit
+
 --------------------------------------------------------------------------------
 -- Datum Cache Queries
 --------------------------------------------------------------------------------
@@ -1061,7 +1091,13 @@ mkOgmiosWebSocketLens logger datumCacheWebSocketRef = do
             mkListenerSet dispatcher pendingRequests
         , acquireMempool:
             mkListenerSet dispatcher pendingRequests
+        , releaseMempool:
+            mkListenerSet dispatcher pendingRequests
         , mempoolHasTx:
+            mkListenerSet dispatcher pendingRequests
+        , mempoolNextTx:
+            mkListenerSet dispatcher pendingRequests
+        , mempoolSizeAndCapcity:
             mkListenerSet dispatcher pendingRequests
         , submit:
             mkSubmitTxListenerSet dispatcher pendingSubmitTxRequests
@@ -1106,7 +1142,10 @@ type OgmiosListeners =
   , currentEpoch :: ListenerSet Unit Ogmios.CurrentEpoch
   , systemStart :: ListenerSet Unit Ogmios.SystemStart
   , acquireMempool :: ListenerSet Unit Ogmios.MempoolSnapshotAcquired
+  , releaseMempool :: ListenerSet Unit Ogmios.MempoolReleased
   , mempoolHasTx :: ListenerSet TxHash Boolean
+  , mempoolNextTx :: ListenerSet Unit (Maybe Ogmios.MempoolTransaction)
+  , mempoolSizeAndCapcity :: ListenerSet Unit Ogmios.MempoolSizeAndCapacity
   , poolIds :: ListenerSet Unit PoolIdsR
   , poolParameters :: ListenerSet (Array PoolPubKeyHash) PoolParametersR
   , delegationsAndRewards :: ListenerSet (Array String) DelegationsAndRewardsR
