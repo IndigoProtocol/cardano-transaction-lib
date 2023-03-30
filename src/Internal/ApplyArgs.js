@@ -3,10 +3,10 @@
 let lib;
 let apply_args;
 if (typeof BROWSER_RUNTIME != "undefined" && BROWSER_RUNTIME) {
-  lib = require("@mitchycola/cardano-serialization-lib-browser");
+  lib = require("@emurgo/cardano-serialization-lib-browser");
   apply_args = require("apply-args-browser");
 } else {
-  lib = require("@mitchycola/cardano-serialization-lib-nodejs");
+  lib = require("@emurgo/cardano-serialization-lib-nodejs");
   apply_args = require("apply-args-nodejs");
 }
 

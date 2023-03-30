@@ -6,9 +6,9 @@ const SHA3 = require("jssha/dist/sha3");
 
 let lib;
 if (typeof BROWSER_RUNTIME != "undefined" && BROWSER_RUNTIME) {
-  lib = require("@mitchycola/cardano-serialization-lib-browser");
+  lib = require("@emurgo/cardano-serialization-lib-browser");
 } else {
-  lib = require("@mitchycola/cardano-serialization-lib-nodejs");
+  lib = require("@emurgo/cardano-serialization-lib-nodejs");
 }
 
 exports.blake2b224Hash = bytesToHash => {
