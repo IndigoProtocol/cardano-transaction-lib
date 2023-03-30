@@ -25,14 +25,3 @@ exports._unpackPlutusMap = containerHelper => tuple => plutusMap => {
   }
   return res;
 };
-
-exports._unpackPlutusDatumMap = containerHelper => tuple => plutusDatumMap => {
-  const keys = containerHelper.unpack(plutusDatumMap.keys());
-  const res = [];
-  for (let key of keys) {
-    // Assuming that `PlutusMap.get()` never fails on elements from result of
-    // its `.keys()` call.
-    res.push(tuple(key)(plutusDatumMap.get(key)));
-  }
-  return res;
-};

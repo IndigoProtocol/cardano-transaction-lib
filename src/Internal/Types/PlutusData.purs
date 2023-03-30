@@ -1,7 +1,6 @@
 module Ctl.Internal.Types.PlutusData
   ( PlutusData
       ( Constr
-      , DatumMap
       , Map
       , List
       , Integer
@@ -35,7 +34,6 @@ import Data.Tuple.Nested ((/\))
 -- Doesn't distinguish "BuiltinData" and "Data" like Plutus:
 data PlutusData
   = Constr BigNum (Array PlutusData)
-  | DatumMap (Array (Tuple PlutusData PlutusData))
   | Map (Array (Tuple PlutusData PlutusData))
   | List (Array PlutusData)
   | Integer BigInt
@@ -94,15 +92,6 @@ instance EncodeAeson PlutusData where
   encodeAeson (Constr constr fields) = encodeAeson
     { "constr": constr
     , "fields": fields
-    }
-  encodeAeson (DatumMap elems) = encodeAeson
-    { "map": encodeAeson $ map
-        ( \(k /\ v) ->
-            { "key": encodeAeson k
-            , "value": encodeAeson v
-            }
-        )
-        elems
     }
   encodeAeson (Map elems) = encodeAeson
     { "map": encodeAeson $ map

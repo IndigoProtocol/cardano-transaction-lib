@@ -19,7 +19,6 @@ import Ctl.Internal.Serialization.Types
   ( BigInt
   , ConstrPlutusData
   , PlutusData
-  , PlutusDatumMap
   , PlutusList
   , PlutusMap
   )
@@ -29,7 +28,7 @@ import Ctl.Internal.Types.CborBytes (CborBytes)
 import Ctl.Internal.Types.PlutusData
   ( PlutusData(Constr, Map, List, Integer, Bytes)
   ) as T
-import Data.Maybe (Maybe(Just, Nothing), fromJust)
+import Data.Maybe (Maybe, fromJust)
 import Data.Newtype (unwrap)
 import Data.Tuple (Tuple(Tuple))
 import Data.Tuple.Nested (type (/\), (/\))
@@ -62,10 +61,7 @@ convertPlutusConstr pd = do
 -- output of `convertMap` should be `Map` instead of the ad hoc `DatumMap`,
 -- since a CBOR map is not limited to a datum.
 convertMap :: PlutusData -> Maybe T.PlutusData
-convertMap pd = do
-  case getOriginalBytes pd of
-    Just (bytes) -> convertDatumMap bytes
-    Nothing -> convertPlutusMap pd
+convertMap pd = convertPlutusMap pd
 
 convertPlutusMap :: PlutusData -> Maybe T.PlutusData
 convertPlutusMap pd = do
@@ -73,14 +69,6 @@ convertPlutusMap pd = do
     _unpackPlutusMap containerHelper Tuple >>> map
       \(k /\ v) -> (convertPlutusData k /\ convertPlutusData v)
 
-  pure $ T.Map entries
-
-convertDatumMap :: ByteArray -> Maybe T.PlutusData
-convertDatumMap bytes = do
-  entries <-
-    (fromBytes bytes :: Maybe PlutusDatumMap) <#>
-      _unpackPlutusDatumMap containerHelper Tuple >>> map
-      \(k /\ v) -> (convertPlutusData k /\ convertPlutusData v)
   pure $ T.Map entries
 
 convertPlutusList :: PlutusData -> Maybe T.PlutusData
@@ -99,9 +87,6 @@ convertPlutusBytes pd = T.Bytes <$> _PlutusData_bytes maybeFfiHelper pd
 
 deserializeData :: forall (a :: Type). FromData a => CborBytes -> Maybe a
 deserializeData = fromData <=< map convertPlutusData <<< fromBytes <<< unwrap
-
-getOriginalBytes :: PlutusData -> Maybe ByteArray
-getOriginalBytes = _PlutusData_originalBytes maybeFfiHelper
 
 foreign import _PlutusData_constr
   :: MaybeFfiHelper -> PlutusData -> Maybe ConstrPlutusData
@@ -127,12 +112,6 @@ foreign import _unpackPlutusMap
   :: ContainerHelper
   -> (forall a b. a -> b -> Tuple a b)
   -> PlutusMap
-  -> Array (PlutusData /\ PlutusData)
-
-foreign import _unpackPlutusDatumMap
-  :: ContainerHelper
-  -> (forall a b. a -> b -> Tuple a b)
-  -> PlutusDatumMap
   -> Array (PlutusData /\ PlutusData)
 
 foreign import _PlutusData_originalBytes

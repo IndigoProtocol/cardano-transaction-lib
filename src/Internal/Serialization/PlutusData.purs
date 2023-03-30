@@ -1,6 +1,5 @@
 module Ctl.Internal.Serialization.PlutusData
   ( convertPlutusData
-  , convertPlutusDatumMap
   , packPlutusList
   ) where
 
@@ -12,12 +11,10 @@ import Ctl.Internal.FfiHelpers
   , containerHelper
   , maybeFfiHelper
   )
-import Ctl.Internal.Serialization.ToBytes (toBytes)
 import Ctl.Internal.Serialization.Types
   ( BigInt
   , ConstrPlutusData
   , PlutusData
-  , PlutusDatumMap
   , PlutusList
   , PlutusMap
   )
@@ -29,12 +26,10 @@ import Data.Maybe (Maybe, fromJust)
 import Data.Tuple (Tuple, fst, snd)
 import Data.Tuple.Nested (type (/\), (/\))
 import Partial.Unsafe (unsafePartial)
-import Untagged.Union (asOneOf)
 
 convertPlutusData :: T.PlutusData -> PlutusData
 convertPlutusData x = case x of
   T.Constr alt list -> convertConstr alt list
-  T.DatumMap mp -> convertPlutusDatumMap mp
   T.Map mp -> convertPlutusMap mp
   T.List lst -> convertPlutusList lst
   T.Integer n -> convertPlutusInteger n
@@ -59,15 +54,6 @@ convertPlutusMap mp =
   in
     _mkPlutusData_map $ _packMap fst snd entries
 
-convertPlutusDatumMap
-  :: Array (T.PlutusData /\ T.PlutusData) -> PlutusData
-convertPlutusDatumMap mp =
-  let
-    entries :: Array (PlutusData /\ PlutusData)
-    entries = mp <#> \(k /\ v) -> (convertPlutusData k /\ convertPlutusData v)
-  in
-    _mkPlutusData_datumMap $ toBytes $ asOneOf $ _packDatumMap fst snd entries
-
 convertPlutusInteger :: BigInt.BigInt -> PlutusData
 convertPlutusInteger n =
   _mkPlutusData_integer $ convertBigInt n
@@ -86,7 +72,6 @@ packPlutusList = (_packPlutusList containerHelper)
 foreign import _mkPlutusData_bytes :: ByteArray -> PlutusData
 foreign import _mkPlutusData_list :: PlutusList -> PlutusData
 foreign import _mkPlutusData_map :: PlutusMap -> PlutusData
-foreign import _mkPlutusData_datumMap :: ByteArray -> PlutusData
 foreign import _mkPlutusData_integer :: BigInt -> PlutusData
 foreign import _mkPlutusData_constr :: ConstrPlutusData -> PlutusData
 
@@ -100,9 +85,3 @@ foreign import _packMap
   -> (forall a b. Tuple a b -> b)
   -> Array (PlutusData /\ PlutusData)
   -> PlutusMap
-
-foreign import _packDatumMap
-  :: (forall a b. Tuple a b -> a)
-  -> (forall a b. Tuple a b -> b)
-  -> Array (PlutusData /\ PlutusData)
-  -> PlutusDatumMap
