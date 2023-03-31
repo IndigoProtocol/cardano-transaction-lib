@@ -39,7 +39,7 @@ convertPlutusData :: PlutusData -> T.PlutusData
 -- constructor, and Just will be returned by one of functions
 convertPlutusData pd = unsafePartial $ fromJust $
   convertPlutusConstr pd
-    <|> convertMap pd
+    <|> convertPlutusMap pd
     <|> convertPlutusList pd
     <|> convertPlutusInteger pd
     <|> convertPlutusBytes pd
@@ -52,16 +52,6 @@ convertPlutusConstr pd = do
       _unpackPlutusList containerHelper (_ConstrPlutusData_data constr)
     alt = _ConstrPlutusData_alternative constr
   pure $ T.Constr alt data'
-
--- With no good way of knowing the data types that are contained in a map defore
--- deserialization, we can assume that CSL's default map deserialization should
--- be used, unless the original bytes of the `PlutusData` is provided to CSL.
--- The key-value pairs should be returned unsorted by defalut, since CSL should
--- always be storing the original bytes while deserializing `PlutusData`. The 
--- output of `convertMap` should be `Map` instead of the ad hoc `DatumMap`,
--- since a CBOR map is not limited to a datum.
-convertMap :: PlutusData -> Maybe T.PlutusData
-convertMap pd = convertPlutusMap pd
 
 convertPlutusMap :: PlutusData -> Maybe T.PlutusData
 convertPlutusMap pd = do
