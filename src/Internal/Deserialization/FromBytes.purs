@@ -26,6 +26,7 @@ import Ctl.Internal.Serialization.Types
   , Mint
   , NativeScript
   , PlutusData
+  , PlutusDatumMap
   , PoolMetadataHash
   , PublicKey
   , Redeemers
@@ -90,6 +91,9 @@ instance FromBytes NativeScript where
 
 instance FromBytes PlutusData where
   fromBytes' = fromBytesImpl "PlutusData"
+
+instance FromBytes PlutusDatumMap where
+  fromBytes' = fromBytesImpl "PlutusDatumMap"
 
 instance FromBytes PoolMetadataHash where
   fromBytes' = fromBytesImpl "PoolMetadataHash"

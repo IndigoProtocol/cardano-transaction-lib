@@ -5,6 +5,8 @@ module Ctl.Internal.Test.ContractTest
   , ContractTestHandler
   , ContractTestPlan(ContractTestPlan)
   , ContractTestPlanHandler
+  , sameWallets
+  , groupContractTestPlans
   ) where
 
 import Prelude
@@ -12,6 +14,9 @@ import Prelude
 import Contract.Monad (Contract)
 import Ctl.Internal.Test.TestPlanM (TestPlanM)
 import Ctl.Internal.Test.UtxoDistribution (class UtxoDistribution)
+import Data.Tuple.Nested ((/\))
+import Mote.Monad (group, mapTest)
+import Data.Tuple (fst, snd)
 
 -- | Represents a `Contract` test suite that depend on *some* wallet
 -- | `UtxoDistribution`.
@@ -50,6 +55,15 @@ newtype ContractTestPlan = ContractTestPlan
     -> r
   )
 
+instance Semigroup ContractTestPlan where
+  append (ContractTestPlan runContractTestPlan) (ContractTestPlan runContractTestPlan') =
+    do
+      runContractTestPlan \distr tests -> do
+        runContractTestPlan'
+          \distr' tests' -> ContractTestPlan \h -> h (distr /\ distr') do
+            mapTest (_ <<< fst) tests
+            mapTest (_ <<< snd) tests'
+
 -- | Same as `ContractTestHandler`, but wrapped in a `TestPaln`.
 type ContractTestPlanHandler :: Type -> Type -> Type -> Type
 type ContractTestPlanHandler distr wallets r =
@@ -57,3 +71,18 @@ type ContractTestPlanHandler distr wallets r =
   => distr
   -> TestPlanM (wallets -> Contract Unit) Unit
   -> r
+
+-- | Store a wallet `UtxoDistribution` and `Contract`s that depend on that wallet
+sameWallets 
+  :: forall (distr :: Type) (wallets :: Type)
+   . UtxoDistribution distr wallets
+  => distr
+  -> TestPlanM (wallets -> Contract Unit) Unit
+  -> ContractTestPlan
+sameWallets distr tests = ContractTestPlan \h -> h distr tests
+
+-- | Group `ContractTestPlans` together, so that they can be ran in the same Plutip instance
+groupContractTestPlans :: String -> ContractTestPlan -> ContractTestPlan
+groupContractTestPlans title (ContractTestPlan runContractTestPlan) = do
+  runContractTestPlan \distr tests -> ContractTestPlan \h -> h distr do
+    group title tests

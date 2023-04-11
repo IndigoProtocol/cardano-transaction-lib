@@ -6,11 +6,19 @@ const SHA3 = require("jssha/dist/sha3");
 
 let lib;
 if (typeof BROWSER_RUNTIME != "undefined" && BROWSER_RUNTIME) {
-  lib = require("@emurgo/cardano-serialization-lib-browser");
+  lib = require("@mitchycola/cardano-serialization-lib-browser");
 } else {
-  lib = require("@emurgo/cardano-serialization-lib-nodejs");
+  lib = require("@mitchycola/cardano-serialization-lib-nodejs");
 }
 lib = require("@mlabs-haskell/csl-gc-wrapper")(lib);
+
+exports.blake2b224Hash = bytesToHash => {
+  return Blake2.blake2b(bytesToHash, null, 28);
+};
+
+exports.blake2b224HashHex = bytesToHash => {
+  return Blake2.blake2bHex(bytesToHash, null, 28);
+};
 
 exports.blake2b224Hash = bytesToHash => {
   return Blake2.blake2b(bytesToHash, null, 28);

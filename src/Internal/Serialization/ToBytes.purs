@@ -1,5 +1,6 @@
 module Ctl.Internal.Serialization.ToBytes
   ( toBytes
+  , toBytes'
   ) where
 
 import Prelude
@@ -19,6 +20,7 @@ import Ctl.Internal.Serialization.Types
   , Mint
   , NativeScript
   , PlutusData
+  , PlutusDatumMap
   , PoolMetadataHash
   , Redeemers
   , ScriptDataHash
@@ -46,6 +48,7 @@ type SerializableData = Address
   |+| Mint
   |+| NativeScript
   |+| PlutusData
+  |+| PlutusDatumMap
   |+| PoolMetadataHash
   |+| Redeemers
   |+| ScriptDataHash
@@ -72,3 +75,8 @@ toBytes
   => a
   -> CborBytes
 toBytes = CborBytes <<< _toBytes
+
+toBytes'
+  :: SerializableData
+  -> ByteArray
+toBytes' = _toBytes

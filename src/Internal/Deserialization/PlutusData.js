@@ -2,18 +2,23 @@
 
 let lib;
 if (typeof BROWSER_RUNTIME != "undefined" && BROWSER_RUNTIME) {
-  lib = require("@emurgo/cardano-serialization-lib-browser");
+  lib = require("@mitchycola/cardano-serialization-lib-browser");
 } else {
-  lib = require("@emurgo/cardano-serialization-lib-nodejs");
+  lib = require("@mitchycola/cardano-serialization-lib-nodejs");
 }
 lib = require("@mlabs-haskell/csl-gc-wrapper")(lib);
+
+const plutusDataAs = what => helper => data => {
+  const res = data["as_" + what]();
+  return res == null ? helper.nothing : helper.just(res);
+};
 
 exports._convertPlutusData = handle => pd => {
   switch (pd.kind()) {
     case lib.PlutusDataKind.ConstrPlutusData:
       return handle.constr(pd.as_constr_plutus_data());
     case lib.PlutusDataKind.Map:
-      return handle.map(pd.as_map());
+      return handle.map(pd);
     case lib.PlutusDataKind.List:
       return handle.list(pd.as_list());
     case lib.PlutusDataKind.Integer:
@@ -25,6 +30,8 @@ exports._convertPlutusData = handle => pd => {
   }
 };
 
+exports._PlutusData_originalBytes = plutusDataAs("original_bytes");
+exports._PlutusData_map = plutusDataAs("map");
 exports._unpackPlutusList = containerHelper => containerHelper.unpack;
 exports._ConstrPlutusData_alternative = x => x.alternative();
 exports._ConstrPlutusData_data = x => x.data();
@@ -36,6 +43,17 @@ exports._unpackPlutusMap = containerHelper => tuple => plutusMap => {
     // Assuming that `PlutusMap.get()` never fails on elements from result of
     // its `.keys()` call.
     res.push(tuple(key)(plutusMap.get(key)));
+  }
+  return res;
+};
+
+exports._unpackPlutusDatumMap = containerHelper => tuple => plutusDatumMap => {
+  const keys = containerHelper.unpack(plutusDatumMap.keys());
+  const res = [];
+  for (let key of keys) {
+    // Assuming that `PlutusMap.get()` never fails on elements from result of
+    // its `.keys()` call.
+    res.push(tuple(key)(plutusDatumMap.get(key)));
   }
   return res;
 };

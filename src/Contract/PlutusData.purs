@@ -89,7 +89,7 @@ import Ctl.Internal.Types.OutputDatum
   ( OutputDatum(NoOutputDatum, OutputDatumHash, OutputDatum)
   ) as OutputDatum
 import Ctl.Internal.Types.PlutusData
-  ( PlutusData(Constr, Map, List, Integer, Bytes)
+  ( PlutusData(Constr, DatumMap, Map, List, Integer, Bytes)
   ) as PlutusData
 import Ctl.Internal.Types.Redeemer
   ( Redeemer(Redeemer)

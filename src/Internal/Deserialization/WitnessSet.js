@@ -1,3 +1,12 @@
+/* global BROWSER_RUNTIME */
+
+let lib;
+if (typeof BROWSER_RUNTIME != "undefined" && BROWSER_RUNTIME) {
+  lib = require("@mitchycola/cardano-serialization-lib-browser");
+} else {
+  lib = require("@mitchycola/cardano-serialization-lib-nodejs");
+}
+
 const call = property => object => object[property]();
 
 const callMaybe = property => maybe => object => {

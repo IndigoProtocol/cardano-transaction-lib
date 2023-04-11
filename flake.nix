@@ -122,6 +122,7 @@
             packageLock = ./package-lock.json;
             shell = {
               withRuntime = true;
+              withChromium = false;
               shellHook = exportOgmiosFixtures;
               packageLockOnly = true;
               packages = with pkgs; [

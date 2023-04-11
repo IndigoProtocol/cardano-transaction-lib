@@ -64,7 +64,9 @@ type PlutipConfig =
   , suppressLogs :: Boolean
   , hooks :: Hooks
   , clusterConfig ::
-      { slotLength :: Seconds }
+      { slotLength :: Seconds,
+        epochSizeOverride :: Maybe UInt
+      }
   }
 
 type FilePath = String

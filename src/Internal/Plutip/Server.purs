@@ -7,6 +7,7 @@ module Ctl.Internal.Plutip.Server
   , checkPlutipServer
   , stopChildProcessWithPort
   , testPlutipContracts
+  , testPlutipContracts'
   ) where
 
 import Prelude
@@ -80,7 +81,7 @@ import Data.Foldable (sum)
 import Data.HTTP.Method as Method
 import Data.Log.Level (LogLevel)
 import Data.Log.Message (Message)
-import Data.Maybe (Maybe(Nothing, Just), maybe)
+import Data.Maybe (Maybe(Nothing, Just), fromMaybe, maybe)
 import Data.Newtype (over, unwrap, wrap)
 import Data.String.CodeUnits (indexOf) as String
 import Data.String.Pattern (Pattern(Pattern))
@@ -150,7 +151,14 @@ testPlutipContracts
   -> TestPlanM ContractTest Unit
   -> TestPlanM (Aff Unit) Unit
 testPlutipContracts plutipCfg tp = do
-  ContractTestPlan runContractTestPlan <- lift $ execDistribution tp
+  contractTestPlan <- lift $ execDistribution tp
+  testPlutipContracts' plutipCfg contractTestPlan
+
+testPlutipContracts'
+  :: PlutipConfig
+  -> ContractTestPlan
+  -> TestPlanM (Aff Unit) Unit
+testPlutipContracts' plutipCfg (ContractTestPlan runContractTestPlan) = do
   runContractTestPlan \distr tests -> do
     cleanupRef <- liftEffect $ Ref.new mempty
     bracket (startPlutipContractEnv plutipCfg distr cleanupRef)
@@ -407,7 +415,8 @@ startPlutipCluster cfg keysToGenerate = do
                 $ ClusterStartupRequest
                     { keysToGenerate
                     , slotLength: cfg.clusterConfig.slotLength
-                    , epochSize
+                    , epochSize: fromMaybe epochSize
+                        cfg.clusterConfig.epochSizeOverride
                     }
             , responseFormat = Affjax.ResponseFormat.string
             , headers = [ Header.ContentType (wrap "application/json") ]
