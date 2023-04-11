@@ -3,7 +3,6 @@ module Test.Ctl.Plutip.Contract.Assert (suite) where
 
 import Prelude
 
-import Contract.Address (ownPaymentPubKeysHashes, ownStakePubKeysHashes)
 import Contract.Monad (liftedM)
 import Contract.PlutusData (PlutusData(Integer))
 import Contract.Test (ContractTest)
@@ -14,7 +13,11 @@ import Contract.Test.Assert
   )
 import Contract.Test.Mote (TestPlanM)
 import Contract.Test.Plutip (InitialUTxOs, withWallets)
-import Contract.Wallet (withKeyWallet)
+import Contract.Wallet
+  ( ownPaymentPubKeyHashes
+  , ownStakePubKeyHashes
+  , withKeyWallet
+  )
 import Control.Monad.Trans.Class (lift)
 import Ctl.Examples.ContractTestUtils as ContractTestUtils
 import Ctl.Examples.Helpers (mkCurrencySymbol, mkTokenName)
@@ -45,8 +48,8 @@ suite = do
 
       withWallets distribution \(alice /\ bob) -> do
         receiverPkh <- liftedM "Unable to get Bob's PKH" $
-          head <$> withKeyWallet bob ownPaymentPubKeysHashes
-        receiverSkh <- join <<< head <$> withKeyWallet bob ownStakePubKeysHashes
+          head <$> withKeyWallet bob ownPaymentPubKeyHashes
+        receiverSkh <- join <<< head <$> withKeyWallet bob ownStakePubKeyHashes
 
         mintingPolicy /\ cs <- mkCurrencySymbol alwaysMintsPolicyV2
 
@@ -74,8 +77,8 @@ suite = do
 
       withWallets distribution \(alice /\ bob) -> do
         receiverPkh <- liftedM "Unable to get Bob's PKH" $
-          head <$> withKeyWallet bob ownPaymentPubKeysHashes
-        receiverSkh <- join <<< head <$> withKeyWallet bob ownStakePubKeysHashes
+          head <$> withKeyWallet bob ownPaymentPubKeyHashes
+        receiverSkh <- join <<< head <$> withKeyWallet bob ownStakePubKeyHashes
 
         mintingPolicy /\ cs <- mkCurrencySymbol alwaysMintsPolicyV2
 
@@ -99,17 +102,14 @@ suite = do
             ContractTestUtils.mkContract params
           eiResult `shouldSatisfy` isRight
           printContractAssertionFailures failures `shouldEqual`
-            "The following `Contract` assertions have failed: \n    1.\
-            \ Unexpected token delta (TokenName (hexToRawBytesUnsafe\
-            \ \"546865546f6b656e\")) at address Sender (Expected: fromString\
-            \ \"2\", Actual: fromString \"1\")"
+            "In addition to the error above, the following `Contract` assertions have failed:\n\n    1. Unexpected token delta (TokenName (hexToRawBytesUnsafe \"546865546f6b656e\")) at address Sender Expected: fromString \"2\", Actual: fromString \"1\""
 
     test "ExUnits limit reached" do
 
       withWallets distribution \(alice /\ bob) -> do
         receiverPkh <- liftedM "Unable to get Bob's PKH" $
-          head <$> withKeyWallet bob ownPaymentPubKeysHashes
-        receiverSkh <- join <<< head <$> withKeyWallet bob ownStakePubKeysHashes
+          head <$> withKeyWallet bob ownPaymentPubKeyHashes
+        receiverSkh <- join <<< head <$> withKeyWallet bob ownStakePubKeyHashes
 
         mintingPolicy /\ cs <- mkCurrencySymbol alwaysMintsPolicyV2
 
@@ -137,17 +137,14 @@ suite = do
             ContractTestUtils.mkContract params
           eiResult `shouldSatisfy` isRight
           printContractAssertionFailures failures `shouldEqual`
-            "The following `Contract` assertions have failed: \n    \
-            \1. ExUnits limit exceeded:  (Expected: { mem: fromString \"800\",\
-            \ steps: fromString \"16110\" }, Actual: { mem: fromString \"800\",\
-            \ steps: fromString \"161100\" })"
+            "In addition to the error above, the following `Contract` assertions have failed:\n\n    1. ExUnits limit exceeded:  Expected: { mem: fromString \"800\", steps: fromString \"16110\" }, Actual: { mem: fromString \"800\", steps: fromString \"161100\" }"
 
     test "An exception is thrown - everything is reported" do
 
       withWallets distribution \(alice /\ bob) -> do
         receiverPkh <- liftedM "Unable to get Bob's PKH" $
-          head <$> withKeyWallet bob ownPaymentPubKeysHashes
-        receiverSkh <- join <<< head <$> withKeyWallet bob ownStakePubKeysHashes
+          head <$> withKeyWallet bob ownPaymentPubKeyHashes
+        receiverSkh <- join <<< head <$> withKeyWallet bob ownStakePubKeyHashes
 
         mintingPolicy /\ cs <- mkCurrencySymbol alwaysMintsPolicyV2
 
@@ -179,18 +176,4 @@ suite = do
 
           eiResult `shouldSatisfy` isLeft
           printContractAssertionFailures failures `shouldEqual`
-            "The following `Contract` assertions have failed: \n\
-            \    1. Unexpected lovelace delta at address Sender (Expected: \
-            \fromString \"0\", Actual: fromString \"-5195758\")\n\n\
-            \    2. Unexpected token delta (TokenName (hexToRawBytesUnsafe\
-            \ \"546865546f6b656e\")) at address Sender (Expected: \
-            \fromString \"2\", Actual: fromString \"1\")\n\n\
-            \    3. ExUnits limit exceeded:  (Expected: { mem: fromString\
-            \ \"800\", steps: fromString \"16110\" }, Actual: { \
-            \mem: fromString \"800\", steps: fromString \"161100\" \
-            \})\n\n\
-            \The following `Contract` checks have been skipped due to an \
-            \exception: \n\n\
-            \    1. Sender's output has a datum\n\n\
-            \    2. Output has a reference script\n\n\
-            \    3. Contains CIP-25 metadata"
+            "In addition to the error above, the following `Contract` assertions have failed:\n\n    1. Error while trying to get expected value: Unable to estimate expected loss in wallet\n\n    2. Unexpected token delta (TokenName (hexToRawBytesUnsafe \"546865546f6b656e\")) at address Sender Expected: fromString \"2\", Actual: fromString \"1\" \n\n    3. ExUnits limit exceeded:  Expected: { mem: fromString \"800\", steps: fromString \"16110\" }, Actual: { mem: fromString \"800\", steps: fromString \"161100\" } \n\nThe following `Contract` checks have been skipped due to an exception: \n\n    1. Sender's output has a datum\n\n    2. Output has a reference script\n\n    3. Contains CIP-25 metadata"

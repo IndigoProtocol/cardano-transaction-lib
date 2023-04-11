@@ -50,7 +50,7 @@ import Ctl.Internal.Test.E2E.Types
   , SettingsArchive
   , SettingsRuntime
   , TmpDir
-  , WalletExt(FlintExt, NamiExt, GeroExt, LodeExt, EternlExt)
+  , WalletExt(FlintExt, NamiExt, GeroExt, LodeExt, EternlExt, LaceExt)
   , getE2EWalletExtension
   , mkE2ETest
   , mkExtensionId
@@ -63,6 +63,8 @@ import Ctl.Internal.Test.E2E.Wallets
   , flintSign
   , geroConfirmAccess
   , geroSign
+  , laceConfirmAccess
+  , laceSign
   , lodeConfirmAccess
   , lodeSign
   , namiConfirmAccess
@@ -145,14 +147,12 @@ runE2ECommand = case _ of
     noHeadless <- liftEffect $ readNoHeadless testOptions.noHeadless
     testTimeout <- liftEffect $ readTestTimeout testOptions.testTimeout
     portOptions <- liftEffect $ readPorts testOptions
-    skipJQuery <- liftEffect $ readSkipJQuery testOptions.skipJQuery
     extraBrowserArgs <- liftEffect $ readExtraArgs testOptions.extraBrowserArgs
     let
       testOptions' = build (merge portOptions) $ testOptions
         { noHeadless = noHeadless
         , testTimeout = testTimeout
         , tests = tests
-        , skipJQuery = skipJQuery
         , extraBrowserArgs = extraBrowserArgs
         }
     runE2ETests testOptions' runtime
@@ -231,11 +231,13 @@ testPlan
 testPlan opts@{ tests } rt@{ wallets } =
   group "E2E tests" do
     for_ tests \testEntry@{ specString } -> test specString $ case testEntry of
+      -- KeyWallet tests
       { url, wallet: NoWallet } -> do
         withBrowser opts.noHeadless opts.extraBrowserArgs rt Nothing \browser ->
           do
-            withE2ETest opts.skipJQuery (wrap url) browser \{ page } -> do
+            withE2ETest true (wrap url) browser \{ page } -> do
               subscribeToTestStatusUpdates page
+      -- Plutip in E2E tests
       { url, wallet: PlutipCluster } -> do
         let
           distr = withStakeKey privateStakeKey
@@ -261,9 +263,10 @@ testPlan opts@{ tests } rt@{ wallets } =
               _ -> liftEffect $ throw "Unsupported backend"
             withBrowser opts.noHeadless opts.extraBrowserArgs rt Nothing
               \browser -> do
-                withE2ETest opts.skipJQuery (wrap url) browser \{ page } -> do
+                withE2ETest true (wrap url) browser \{ page } -> do
                   setClusterSetup page clusterSetup
                   subscribeToTestStatusUpdates page
+      -- E2E tests with a light wallet
       { url, wallet: WalletExtension wallet } -> do
         { password, extensionId } <- liftEffect
           $ liftMaybe
@@ -271,7 +274,7 @@ testPlan opts@{ tests } rt@{ wallets } =
           $ Map.lookup wallet wallets
         withBrowser opts.noHeadless opts.extraBrowserArgs rt (Just extensionId)
           \browser -> do
-            withE2ETest opts.skipJQuery (wrap url) browser \re@{ page } -> do
+            withE2ETest false (wrap url) browser \re@{ page } -> do
               let
                 confirmAccess =
                   case wallet of
@@ -280,6 +283,7 @@ testPlan opts@{ tests } rt@{ wallets } =
                     GeroExt -> geroConfirmAccess
                     LodeExt -> lodeConfirmAccess
                     NamiExt -> namiConfirmAccess
+                    LaceExt -> laceConfirmAccess
                 sign =
                   case wallet of
                     EternlExt -> eternlSign
@@ -287,6 +291,7 @@ testPlan opts@{ tests } rt@{ wallets } =
                     GeroExt -> geroSign
                     LodeExt -> lodeSign
                     NamiExt -> namiSign
+                    LaceExt -> laceSign
                 someWallet =
                   { wallet
                   , name: walletName wallet
@@ -305,8 +310,11 @@ testPlan opts@{ tests } rt@{ wallets } =
                       ConfirmAccess -> rethrow someWallet.confirmAccess
                       Sign -> rethrow someWallet.sign
                       Success -> pure unit
-                      Failure _ -> pure unit -- error raised directly inside `subscribeToBrowserEvents`
+                      -- error will be raised directly inside
+                      -- `subscribeToBrowserEvents`
+                      Failure _ -> pure unit
   where
+  -- A specialized version that does not deal with wallet automation
   subscribeToTestStatusUpdates :: Toppokki.Page -> Aff Unit
   subscribeToTestStatusUpdates page =
     subscribeToBrowserEvents page
@@ -347,7 +355,6 @@ readTestRuntime testOptions = do
             <<< delete (Proxy :: Proxy "testTimeout")
             <<< delete (Proxy :: Proxy "plutipPort")
             <<< delete (Proxy :: Proxy "ogmiosPort")
-            <<< delete (Proxy :: Proxy "skipJQuery")
             <<< delete (Proxy :: Proxy "kupoPort")
         )
   readBrowserRuntime Nothing $ removeUnneeded testOptions
@@ -388,6 +395,7 @@ readExtensions wallets = do
   gero <- readExtensionParams "GERO" wallets
   lode <- readExtensionParams "LODE" wallets
   eternl <- readExtensionParams "ETERNL" wallets
+  lace <- readExtensionParams "LACE" wallets
 
   pure $ Map.fromFoldable $ catMaybes
     [ Tuple NamiExt <$> nami
@@ -395,6 +403,7 @@ readExtensions wallets = do
     , Tuple GeroExt <$> gero
     , Tuple LodeExt <$> lode
     , Tuple EternlExt <$> eternl
+    , Tuple LaceExt <$> lace
     ]
 
 -- | Read E2E test suite parameters from environment variables and CLI
@@ -557,16 +566,6 @@ retrieveJQuery :: Toppokki.Page -> Aff String
 retrieveJQuery = toAffE <<< _retrieveJQuery
 
 foreign import _retrieveJQuery :: Toppokki.Page -> Effect (Promise String)
-
-readSkipJQuery :: Boolean -> Effect Boolean
-readSkipJQuery true = pure true
-readSkipJQuery false = do
-  mbStr <- lookupEnv "E2E_SKIP_JQUERY_DOWNLOAD"
-  case mbStr of
-    Nothing -> pure false
-    Just str -> do
-      liftMaybe (error $ "Failed to read E2E_SKIP_JQUERY_DOWNLOAD: " <> str) $
-        readBoolean str
 
 readExtraArgs :: Array BrowserArg -> Effect (Array BrowserArg)
 readExtraArgs old = do
@@ -933,3 +932,4 @@ walletName = case _ of
   GeroExt -> "gero"
   LodeExt -> "lode"
   NamiExt -> "nami"
+  LaceExt -> "lace"
