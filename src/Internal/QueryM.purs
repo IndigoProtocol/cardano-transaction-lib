@@ -38,6 +38,7 @@ module Ctl.Internal.QueryM
   , mempoolSnapshotSizeAndCapacityAff
   , releaseMempoolAff
   , mempoolSnapshotNextTxAff
+  , acquireMempoolSnapshotAff
   ) where
 
 import Prelude
