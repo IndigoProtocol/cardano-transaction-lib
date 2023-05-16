@@ -10,7 +10,7 @@
       type = "github";
       owner = "Plutonomicon";
       repo = "cardano-transaction-lib";
-      rev = "ee5233d556bce8aee7fd1c2934641b72eecae196";
+      rev = "8d80a2a48c1c233f91fcfd1a8b17d46ad1314930";
     };
     # To use the same version of `nixpkgs` as we do
     nixpkgs.follows = "ctl/nixpkgs";
@@ -136,6 +136,8 @@
         {
           default = self.apps.${system}.ctl-scaffold-runtime;
           ctl-scaffold-runtime = pkgs.launchCtlRuntime runtimeConfig;
+          ctl-scaffold-blockfrost-runtime = pkgs.launchCtlRuntime
+            (pkgs.lib.recursiveUpdate runtimeConfig { blockfrost = { enable = true; }; });
           docs = (psProjectFor pkgs).launchSearchablePursDocs { };
         });
 

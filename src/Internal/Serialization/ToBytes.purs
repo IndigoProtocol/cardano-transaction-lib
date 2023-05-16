@@ -31,6 +31,8 @@ import Ctl.Internal.Serialization.Types
   , TransactionUnspentOutput
   , TransactionWitnessSet
   , Value
+  , Vkeywitness
+  , Vkeywitnesses
   )
 import Ctl.Internal.Types.ByteArray (ByteArray)
 import Ctl.Internal.Types.CborBytes (CborBytes(CborBytes))
@@ -62,6 +64,8 @@ type SerializableData = Address
   |+| TransactionWitnessSet
   |+| Value
   |+| VRFKeyHash
+  |+| Vkeywitness
+  |+| Vkeywitnesses
 
 -- Add more as needed
 

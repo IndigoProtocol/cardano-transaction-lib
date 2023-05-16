@@ -6,7 +6,7 @@ import Contract.Config (testnetConfig)
 import Contract.Monad (Contract, runContract)
 import Contract.ScriptLookups
   ( ScriptLookups
-  , UnattachedUnbalancedTx
+  , UnbalancedTx
   , mkUnbalancedTx
   )
 import Contract.Time
@@ -25,14 +25,11 @@ import Contract.Time
   )
 import Contract.TxConstraints (mustValidateIn)
 import Control.Monad.Except (throwError)
-import Ctl.Internal.Cardano.Types.Transaction (_body)
 import Ctl.Internal.Test.TestPlanM (TestPlanM)
 import Ctl.Internal.Types.BigNum (BigNum)
 import Ctl.Internal.Types.BigNum (fromInt, toInt) as BigNum
 import Ctl.Internal.Types.Interval (Interval)
-import Ctl.Internal.Types.UnbalancedTransaction (_transaction)
 import Data.BigInt (fromString) as BigInt
-import Data.Lens (view)
 import Effect.Aff (Aff)
 import Effect.Exception (error)
 import Mote (group, test)
@@ -149,17 +146,16 @@ unsafeSubtractOne value = wrap <<< fromJust
 --------------------------------------------------------------------------------
 
 getTimeFromUnbalanced
-  :: UnattachedUnbalancedTx -> Contract (Interval POSIXTime)
+  :: UnbalancedTx -> Contract (Interval POSIXTime)
 getTimeFromUnbalanced utx = validityToPosixTime $ unwrap body
   where
-  body = (_transaction <<< _body) `view` (unwrap utx).unbalancedTx
+  body = (unwrap utx) # _.transaction >>> unwrap >>> _.body
 
 toPosixTime :: Slot -> Contract POSIXTime
 toPosixTime time = do
   eraSummaries <- getEraSummaries
   systemStart <- getSystemStart
-  eitherTime <- liftEffect $ slotToPosixTime eraSummaries systemStart time
-  case eitherTime of
+  case slotToPosixTime eraSummaries systemStart time of
     Left e -> (throwError <<< error <<< show) e
     Right value -> pure value
 
@@ -167,9 +163,7 @@ toPosixTimeRange :: Interval Slot -> Contract (Interval POSIXTime)
 toPosixTimeRange range = do
   eraSummaries <- getEraSummaries
   systemStart <- getSystemStart
-  eitherRange <- liftEffect $
-    slotRangeToPosixTimeRange eraSummaries systemStart range
-  case eitherRange of
+  case slotRangeToPosixTimeRange eraSummaries systemStart range of
     Left e -> (throwError <<< error <<< show) e
     Right value -> pure value
 
@@ -206,4 +200,3 @@ validityToPosixTime { validityStartInterval, ttl: timeToLive } =
 
 mkPosixTime :: String -> POSIXTime
 mkPosixTime = wrap <<< unsafePartial fromJust <<< BigInt.fromString
-

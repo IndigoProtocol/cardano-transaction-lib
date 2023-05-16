@@ -2,12 +2,6 @@ module Ctl.Examples.PlutusV2.ReferenceInputs (contract, example, main) where
 
 import Contract.Prelude
 
-import Contract.Address
-  ( Address
-  , getWalletAddresses
-  , ownPaymentPubKeysHashes
-  , ownStakePubKeysHashes
-  )
 import Contract.Config (ContractParams, testnetNamiConfig)
 import Contract.Log (logInfo')
 import Contract.Monad
@@ -37,8 +31,12 @@ import Contract.Transaction
   , submit
   )
 import Contract.TxConstraints as Constraints
-import Contract.Utxos (utxosAt)
 import Contract.Value (lovelaceValueOf) as Value
+import Contract.Wallet
+  ( getWalletUtxos
+  , ownPaymentPubKeyHashes
+  , ownStakePubKeyHashes
+  )
 import Control.Monad.Trans.Class (lift)
 import Ctl.Examples.Helpers (mustPayToPubKeyStakeAddress) as Helpers
 import Data.Array (head) as Array
@@ -58,12 +56,10 @@ contract = do
   logInfo' "Running Examples.PlutusV2.ReferenceInputs"
 
   pkh <- liftedM "Failed to get own PKH"
-    (Array.head <$> ownPaymentPubKeysHashes)
-  skh <- join <<< Array.head <$> ownStakePubKeysHashes
+    (Array.head <$> ownPaymentPubKeyHashes)
+  skh <- join <<< Array.head <$> ownStakePubKeyHashes
 
-  ownAddress <- liftedM "Failed to get own address"
-    (Array.head <$> getWalletAddresses)
-  utxos <- utxosAt ownAddress
+  utxos <- liftedM "Failed to get UTxOs from wallet" getWalletUtxos
   oref <-
     liftContractM "Utxo set is empty"
       (fst <$> Array.head (Map.toUnfoldable utxos :: Array _))
@@ -87,11 +83,10 @@ contract = do
     awaitTxConfirmed txHash
     logInfo' "Tx submitted successfully!"
 
-    pure { ownAddress, referenceInput: oref, balancedSignedTx }
+    pure { referenceInput: oref, balancedSignedTx }
 
 type ContractResult =
-  { ownAddress :: Address
-  , referenceInput :: TransactionInput
+  { referenceInput :: TransactionInput
   , balancedSignedTx :: BalancedSignedTransaction
   }
 
@@ -109,11 +104,11 @@ assertTxContainsReferenceInput =
 
 assertReferenceInputNotSpent :: ContractCheck ContractResult
 assertReferenceInputNotSpent = assertionToCheck "A reference input UTxO"
-  \{ ownAddress, referenceInput } -> do
+  \{ referenceInput } -> do
     let
       assertionFailure :: ContractAssertionFailure
       assertionFailure = CustomFailure "Reference input has been spent"
-    utxos <- lift $ utxosAt ownAddress
+    utxos <- lift $ liftedM "Failed to get UTxOs from wallet" getWalletUtxos
     assertContract assertionFailure do
       Map.member referenceInput utxos
 
