@@ -44,7 +44,6 @@ import Data.Log.Message (Message)
 import Data.Maybe (Maybe)
 import Data.Newtype (class Newtype)
 import Data.Show.Generic (genericShow)
-import Data.String as String
 import Data.Time.Duration (Seconds(Seconds))
 import Data.UInt (UInt)
 import Effect.Aff (Aff)
@@ -64,8 +63,10 @@ type PlutipConfig =
   , suppressLogs :: Boolean
   , hooks :: Hooks
   , clusterConfig ::
-      { slotLength :: Seconds,
-        epochSizeOverride :: Maybe UInt
+      { slotLength :: Seconds
+      , epochSize :: Maybe UInt
+      , maxTxSize :: Maybe UInt
+      , raiseExUnitsToMax :: Boolean
       }
   }
 
@@ -77,16 +78,25 @@ newtype ClusterStartupRequest = ClusterStartupRequest
   { keysToGenerate :: InitialUTxODistribution
   , epochSize :: UInt
   , slotLength :: Seconds
+  , maxTxSize :: Maybe UInt
+  , raiseExUnitsToMax :: Boolean
   }
 
 instance EncodeAeson ClusterStartupRequest where
   encodeAeson
     ( ClusterStartupRequest
-        { keysToGenerate, epochSize, slotLength: Seconds slotLength }
+        { keysToGenerate
+        , epochSize
+        , slotLength: Seconds slotLength
+        , maxTxSize
+        , raiseExUnitsToMax
+        }
     ) = encodeAeson
     { keysToGenerate
     , epochSize
     , slotLength: unsafePartial partialFiniteNumber slotLength
+    , maxTxSize
+    , raiseExUnitsToMax
     }
 
 newtype PrivateKeyResponse = PrivateKeyResponse PrivateKey
@@ -100,12 +110,8 @@ instance Show PrivateKeyResponse where
 instance DecodeAeson PrivateKeyResponse where
   decodeAeson json = do
     cborStr <- decodeAeson json
-    let splitted = String.splitAt 4 cborStr
-    -- 5820 prefix comes from Cbor
-    if splitted.before == "5820" then do
-      cborBytes <- note err $ hexToByteArray splitted.after
-      PrivateKeyResponse <$> note err (privateKeyFromBytes (RawBytes cborBytes))
-    else Left err
+    cborBytes <- note err $ hexToByteArray cborStr
+    PrivateKeyResponse <$> note err (privateKeyFromBytes (RawBytes cborBytes))
     where
     err :: JsonDecodeError
     err = TypeMismatch "PrivateKey"

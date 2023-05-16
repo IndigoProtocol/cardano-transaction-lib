@@ -1,7 +1,7 @@
 module Ctl.Internal.Wallet
   ( module KeyWallet
   , module Cip30Wallet
-  , Wallet(Gero, Nami, Flint, Lode, Eternl, NuFi, KeyWallet)
+  , Wallet(Gero, Nami, Flint, Lode, Eternl, NuFi, Lace, KeyWallet)
   , WalletExtension
       ( NamiWallet
       , LodeWallet
@@ -9,6 +9,7 @@ module Ctl.Internal.Wallet
       , FlintWallet
       , EternlWallet
       , NuFiWallet
+      , LaceWallet
       )
   , isEternlAvailable
   , isGeroAvailable
@@ -72,6 +73,9 @@ import Effect.Class (liftEffect)
 import Partial.Unsafe (unsafePartial)
 import Prim.TypeError (class Warn, Text)
 
+-- NOTE: this data type is defined like this on purpose, don't change it
+-- to `(Cip30Wallet /\ WalletExtension)`. The motivation is to make it simpler
+-- to special-case each wallet in the future, if needed.
 data Wallet
   = Nami Cip30Wallet
   | Gero Cip30Wallet
@@ -79,6 +83,7 @@ data Wallet
   | Eternl Cip30Wallet
   | Lode Cip30Wallet
   | NuFi Cip30Wallet
+  | Lace Cip30Wallet
   | KeyWallet KeyWallet
 
 data WalletExtension
@@ -87,6 +92,7 @@ data WalletExtension
   | FlintWallet
   | EternlWallet
   | LodeWallet
+  | LaceWallet
   | NuFiWallet
 
 mkKeyWallet :: PrivatePaymentKey -> Maybe PrivateStakeKey -> Wallet
@@ -104,14 +110,15 @@ foreign import _icon :: String -> Effect String
 mkWalletAff :: WalletExtension -> Aff Wallet
 mkWalletAff walletExtension =
   case walletExtension of
-    NamiWallet -> Nami <$> mkCip30WalletAff "Nami" (_enableWallet walletName)
-    GeroWallet -> Gero <$> mkCip30WalletAff "Gero" (_enableWallet walletName)
-    EternlWallet -> Eternl <$> mkCip30WalletAff "Eternl"
+    NamiWallet -> Nami <$> mkCip30WalletAff (_enableWallet walletName)
+    GeroWallet -> Gero <$> mkCip30WalletAff (_enableWallet walletName)
+    EternlWallet -> Eternl <$> mkCip30WalletAff
       (_enableWallet walletName)
-    FlintWallet -> Flint <$> mkCip30WalletAff "Flint"
+    FlintWallet -> Flint <$> mkCip30WalletAff
       (_enableWallet walletName)
     LodeWallet -> _mkLodeWalletAff
-    NuFiWallet -> NuFi <$> mkCip30WalletAff "NuFi" (_enableWallet walletName)
+    NuFiWallet -> NuFi <$> mkCip30WalletAff (_enableWallet walletName)
+    LaceWallet -> Lace <$> mkCip30WalletAff (_enableWallet walletName)
   where
   walletName = walletExtensionToName walletExtension
 
@@ -202,8 +209,8 @@ _mkLodeWalletAff = do
   retryNWithIntervalUntil (fromInt' 10) (toNumber 100)
     $ liftEffect (isWalletAvailable LodeWallet)
   catchError
-    (Lode <$> mkCip30WalletAff "Lode" (_enableWallet "LodeWallet"))
-    ( \e -> throwError <<< error $ (show e) <>
+    (Lode <$> mkCip30WalletAff (_enableWallet "LodeWallet"))
+    ( \e -> throwError <<< error $ show e <>
         " Note: LodeWallet is injected asynchronously and may be unreliable."
     )
   where
@@ -224,6 +231,7 @@ cip30Wallet = case _ of
   Eternl c30 -> Just c30
   Lode c30 -> Just c30
   NuFi c30 -> Just c30
+  Lace c30 -> Just c30
   KeyWallet _ -> Nothing
 
 walletExtensionToName :: WalletExtension -> String
@@ -234,6 +242,7 @@ walletExtensionToName = case _ of
   EternlWallet -> "eternl"
   LodeWallet -> "LodeWallet"
   NuFiWallet -> "nufi"
+  LaceWallet -> "lace"
 
 walletToWalletExtension :: Wallet -> Maybe WalletExtension
 walletToWalletExtension = case _ of
@@ -243,6 +252,7 @@ walletToWalletExtension = case _ of
   Eternl _ -> Just EternlWallet
   Lode _ -> Just LodeWallet
   NuFi _ -> Just NuFiWallet
+  Lace _ -> Just LaceWallet
   KeyWallet _ -> Nothing
 
 isEnabled :: WalletExtension -> Aff Boolean
@@ -300,6 +310,7 @@ actionBasedOnWallet walletAction keyWalletAction =
     Flint wallet -> liftAff $ callCip30Wallet wallet walletAction
     Lode wallet -> liftAff $ callCip30Wallet wallet walletAction
     NuFi wallet -> liftAff $ callCip30Wallet wallet walletAction
+    Lace wallet -> liftAff $ callCip30Wallet wallet walletAction
     KeyWallet kw -> keyWalletAction kw
 
 callCip30Wallet
