@@ -17,6 +17,8 @@ module Ctl.Internal.QueryM
   , QueryRuntime
   , SubmitTxListenerSet
   , WebSocket(WebSocket)
+  , acquireMempoolSnapshot
+  , acquireMempoolSnapshotAff
   , evaluateTxOgmios
   , getChainTip
   , getLogger
@@ -27,11 +29,19 @@ module Ctl.Internal.QueryM
   , postAeson
   , mkListenerSet
   , defaultMessageListener
+  , mempoolSnapshotHasTx
+  , mempoolSnapshotHasTxAff
+  , mempoolSnapshotNextTx
+  , mempoolSnapshotNextTxAff
+  , mempoolSnapshotSizeAndCapacity
+  , mempoolSnapshotSizeAndCapacityAff
   , mkOgmiosRequest
   , mkOgmiosRequestAff
   , mkOgmiosWebSocketAff
   , mkRequest
   , mkRequestAff
+  , releaseMempool
+  , releaseMempoolAff
   , scriptToAeson
   , submitTxOgmios
   , underlyingWebSocket
@@ -364,7 +374,8 @@ mempoolSnapshotSizeAndCapacityAff
   -> Ogmios.MempoolSnapshotAcquired
   -> Aff Ogmios.MempoolSizeAndCapacity
 mempoolSnapshotSizeAndCapacityAff ogmiosWs logger ms =
-  mkOgmiosRequestAff ogmiosWs logger (Ogmios.mempoolSnpashotSizeAndCapacityCall ms)
+  mkOgmiosRequestAff ogmiosWs logger
+    (Ogmios.mempoolSnpashotSizeAndCapacityCall ms)
     _.mempoolSizeAndCapcity
     unit
 
@@ -372,7 +383,7 @@ releaseMempoolAff
   :: OgmiosWebSocket
   -> Logger
   -> Ogmios.MempoolSnapshotAcquired
-  -> Aff Ogmios.MempoolReleased
+  -> Aff String
 releaseMempoolAff ogmiosWs logger ms =
   mkOgmiosRequestAff ogmiosWs logger (Ogmios.releaseMempoolCall ms)
     _.releaseMempool
@@ -385,6 +396,50 @@ mempoolSnapshotNextTxAff
   -> Aff (Maybe Ogmios.MempoolTransaction)
 mempoolSnapshotNextTxAff ogmiosWs logger ms =
   mkOgmiosRequestAff ogmiosWs logger (Ogmios.mempoolSnapshotNextTxCall ms)
+    _.mempoolNextTx
+    unit
+
+acquireMempoolSnapshot
+  :: QueryM Ogmios.MempoolSnapshotAcquired
+acquireMempoolSnapshot =
+  mkOgmiosRequest
+    Ogmios.acquireMempoolSnapshotCall
+    _.acquireMempool
+    unit
+
+mempoolSnapshotHasTx
+  :: Ogmios.MempoolSnapshotAcquired
+  -> TxHash
+  -> QueryM Boolean
+mempoolSnapshotHasTx ms =
+  mkOgmiosRequest
+    (Ogmios.mempoolSnapshotHasTxCall ms)
+    _.mempoolHasTx
+
+mempoolSnapshotSizeAndCapacity
+  :: Ogmios.MempoolSnapshotAcquired
+  -> QueryM Ogmios.MempoolSizeAndCapacity
+mempoolSnapshotSizeAndCapacity ms =
+  mkOgmiosRequest
+    (Ogmios.mempoolSnpashotSizeAndCapacityCall ms)
+    _.mempoolSizeAndCapcity
+    unit
+
+releaseMempool
+  :: Ogmios.MempoolSnapshotAcquired
+  -> QueryM String
+releaseMempool ms =
+  mkOgmiosRequest
+    (Ogmios.releaseMempoolCall ms)
+    _.releaseMempool
+    unit
+
+mempoolSnapshotNextTx
+  :: Ogmios.MempoolSnapshotAcquired
+  -> QueryM (Maybe Ogmios.MempoolTransaction)
+mempoolSnapshotNextTx ms =
+  mkOgmiosRequest
+    (Ogmios.mempoolSnapshotNextTxCall ms)
     _.mempoolNextTx
     unit
 
@@ -670,7 +725,7 @@ type OgmiosListeners =
   , currentEpoch :: ListenerSet Unit Ogmios.CurrentEpoch
   , systemStart :: ListenerSet Unit Ogmios.OgmiosSystemStart
   , acquireMempool :: ListenerSet Unit Ogmios.MempoolSnapshotAcquired
-  , releaseMempool :: ListenerSet Unit Ogmios.MempoolReleased
+  , releaseMempool :: ListenerSet Unit String
   , mempoolHasTx :: ListenerSet TxHash Boolean
   , mempoolNextTx :: ListenerSet Unit (Maybe Ogmios.MempoolTransaction)
   , mempoolSizeAndCapcity :: ListenerSet Unit Ogmios.MempoolSizeAndCapacity
