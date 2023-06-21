@@ -13,6 +13,9 @@ module Ctl.Internal.QueryM.Ogmios
   , MempoolSnapshotAcquired
   , MempoolTransaction(..)
   , MempoolTxBody(..)
+  , MempoolSizeAndCapacity(MempoolSizeAndCapacity)
+  , MempoolSnapshotAcquired
+  , MempoolTransaction(MempoolTransaction)
   , OgmiosAddress
   , OgmiosBlockHeaderHash(OgmiosBlockHeaderHash)
   , OgmiosTxOut
@@ -75,6 +78,7 @@ module Ctl.Internal.QueryM.Ogmios
   , querySystemStartCall
   , queryPoolParameters
   , queryDelegationsAndRewards
+  , releaseMempoolCall
   , submitTxCall
   , slotLengthFactor
   , parseIpv6String
@@ -352,7 +356,7 @@ mempoolSnpashotSizeAndCapacityCall _ =
   mkOgmiosCallTypeNoArgs "SizeAndCapacity"
 
 releaseMempoolCall
-  :: MempoolSnapshotAcquired -> JsonWspCall Unit MempoolReleased
+  :: MempoolSnapshotAcquired -> JsonWspCall Unit String
 releaseMempoolCall _ =
   mkOgmiosCallTypeNoArgs "ReleaseMempool"
 
@@ -373,43 +377,28 @@ instance DecodeAeson MempoolSnapshotAcquired where
 -- | The acquired snapshot’s size (in bytes), number of transactions, and capacity
 -- | (in bytes).
 newtype MempoolSizeAndCapacity = MempoolSizeAndCapacity
-  { capacity :: BigInt
-  , currentSize :: BigInt
-  , numberOfTxs :: BigInt
+  { capacity :: Int
+  , currentSize :: Int
+  , numberOfTxs :: Int
   }
 
 derive instance Generic MempoolSizeAndCapacity _
 derive instance Newtype MempoolSizeAndCapacity _
+
 instance Show MempoolSizeAndCapacity where
   show = genericShow
 
 instance DecodeAeson MempoolSizeAndCapacity where
-  decodeAeson = aesonObject $ \o -> do
+  decodeAeson = aesonObject \o -> do
     capacity <- getField o "capacity"
     currentSize <- getField o "currentSize"
     numberOfTxs <- getField o "numberOfTxs"
 
-    pure $ wrap {capacity, currentSize, numberOfTxs}
-
-data MempoolReleased = Released
-
--- Ogmios only has a single response for releasing the mempool
--- https://github.com/CardanoSolutions/ogmios/blob/d326d8839d50ff628f7be1b5552f7cd22b2f094e/server/src/Ogmios/Data/Protocol/StateQuery.hs#L231
-instance DecodeAeson MempoolReleased where
-  decodeAeson = aesonString $ \a -> case a of
-    "Released" -> Right Released
-    _ -> Left $ UnexpectedValue $ JSON.fromString a
-
-instance Show MempoolReleased where
-  show Released = "Mempool Released"
+    pure $ wrap { capacity, currentSize, numberOfTxs }
 
 newtype MempoolTransaction = MempoolTransaction
   { id :: OgmiosTxId
-  -- , inputSource :: InputSource
-  , body :: MempoolTxBody
-  -- , witness :: MempoolWitnessSet
-  -- , metadata :: Maybe MempoolAuxiliaryData
-  -- , raw :: String
+  , raw :: String
   }
 
 derive instance Generic MempoolTransaction _
@@ -418,67 +407,10 @@ instance Show MempoolTransaction where
   show = genericShow
 
 instance DecodeAeson MempoolTransaction where
-  decodeAeson = aesonObject $ \o -> do
-    id <- getField o "id"
-    body <- getField o "body"
-    pure $ MempoolTransaction { id, body }
-
-newtype MempoolTxBody = MempoolTxBody
-  { inputs :: Array OgmiosTxOutRef
-  -- , collaterals :: Array OgmiosTxOutRef
-  , outputs :: Array OgmiosTxOut
-  -- , certificates :: Array Certificate
-  -- , withdrawls :: Map OgmiosRewardAddress BigInt
-  -- , fee :: BigInt
-  -- , validityInterval :: ValidityInterval
-  -- , update :: Maybe Update
-  -- , mint :: Maybe Value
-  -- , network :: Maybe NetworkId
-  -- , scriptIntegrityHash :: Maybe String
-  -- , requiredExtraSignatures :: Array OgmiosRequiredSigner
-  }
-
-derive instance Generic MempoolTxBody _
-derive instance Newtype MempoolTxBody _
-instance Show MempoolTxBody where
-  show = genericShow
-
-instance DecodeAeson MempoolTxBody where
-  decodeAeson = aesonObject $ \o -> do
-    inputs <- aesonArray (traverse parseTxOutRef) =<< getField o "inputs"
-    outputs <- aesonArray (traverse parseTxOut) =<< getField o "outputs"
-    pure $ MempoolTxBody { inputs, outputs }
-
-data InputSource = Inputs | Collaterals
-type OgmiosRewardAddress = String
-type OgmiosRequiredSigner = String
-newtype MempoolWitnessSet = MempoolWitnessSet TransactionWitnessSet
-
-type MempoolAuxiliaryData =
-  { hash :: String
-  , body :: AuxiliaryData
-  }
-
-type ValidityInterval =
-  { invalidBefore :: Maybe BigInt
-  , invalidHereafter :: Maybe BigInt
-  }
-
--- parser for ValidityInterval
-parseValidityInterval :: Aeson -> Either JsonDecodeError ValidityInterval
-parseValidityInterval = aesonObject $ \o -> do
-  invalidBefore <- getFieldOptional o "invalidBefore"
-  invalidHereafter <- getFieldOptional o "invalidHereafter"
-  pure { invalidBefore, invalidHereafter }
-
--- parser for InputSource
-parseInputSource :: Aeson -> Either JsonDecodeError InputSource
-parseInputSource = aesonObject $ \o -> do
-  inputSource <- getField o "invalidSource"
-  case inputSource of
-    "inputs" -> Right Inputs
-    "outputs" -> Right Collaterals
-    _ -> Left $ UnexpectedValue $ JSON.fromString inputSource
+  decodeAeson = aesonObject \o -> do
+    id <- o .: "id"
+    raw <- o .: "raw"
+    pure $ MempoolTransaction { id, raw }
 
 --------------------------------------------------------------------------------
 -- Helpers
@@ -661,30 +593,38 @@ instance DecodeAeson PoolParametersR where
   decodeAeson aeson = do
     obj :: Object (Object Aeson) <- decodeAeson aeson
     kvs <- for (Object.toUnfoldable obj :: Array _) \(Tuple k objParams) -> do
-      vrfKeyhashHex <- objParams .: "vrf"
-      vrfKeyhashBytes <- note (TypeMismatch "VRFKeyHash") $ hexToByteArray
-        vrfKeyhashHex
-      vrfKeyhash <- note (TypeMismatch "VRFKeyHash") $ VRFKeyHash <$> fromBytes
-        (wrap vrfKeyhashBytes)
-      pledge <- objParams .: "pledge"
-      cost <- objParams .: "cost"
-      margin <- decodeUnitInterval =<< objParams .: "margin"
-      rewardAccount <- objParams .: "rewardAccount"
-      poolOwners <- objParams .: "owners"
-      relayArr <- objParams .: "relays"
-      relays <- for relayArr decodeRelay
-      poolMetadata <- objParams .:? "metadata" >>= traverse decodePoolMetadata
-      pure $ k /\
-        { vrfKeyhash
-        , pledge
-        , cost
-        , margin
-        , rewardAccount
-        , poolOwners
-        , relays
-        , poolMetadata
-        }
+      poolParams <- decodePoolParameters objParams
+      pure $ k /\ poolParams
     pure $ PoolParametersR $ Map.fromFoldable kvs
+
+decodePoolParameters :: Object Aeson -> Either JsonDecodeError PoolParameters
+decodePoolParameters objParams = do
+  vrfKeyhash <- decodeVRFKeyHash =<< objParams .: "vrf"
+  pledge <- objParams .: "pledge"
+  cost <- objParams .: "cost"
+  margin <- decodeUnitInterval =<< objParams .: "margin"
+  rewardAccount <- objParams .: "rewardAccount"
+  poolOwners <- objParams .: "owners"
+  relayArr <- objParams .: "relays"
+  relays <- for relayArr decodeRelay
+  poolMetadata <- objParams .:? "metadata" >>= traverse decodePoolMetadata
+  pure
+    { vrfKeyhash
+    , pledge
+    , cost
+    , margin
+    , rewardAccount
+    , poolOwners
+    , relays
+    , poolMetadata
+    }
+
+decodeVRFKeyHash :: Aeson -> Either JsonDecodeError VRFKeyHash
+decodeVRFKeyHash = aesonString $ \vrfKeyhashHex -> do
+  vrfKeyhashBytes <- note (TypeMismatch "VRFKeyHash") $ hexToByteArray
+    vrfKeyhashHex
+  note (TypeMismatch "VRFKeyHash") $ VRFKeyHash <$> fromBytes
+    (wrap vrfKeyhashBytes)
 
 decodeUnitInterval :: Aeson -> Either JsonDecodeError UnitInterval
 decodeUnitInterval aeson = do
@@ -1266,7 +1206,7 @@ aesonArray
   -> Either JsonDecodeError a
 aesonArray = caseAesonArray (Left (TypeMismatch "Expected Array"))
 
--- helper for assuming we get an string
+-- Helper that decodes a string
 aesonString
   :: forall (a :: Type)
    . (String -> Either JsonDecodeError a)
@@ -1298,27 +1238,26 @@ parseTxOut = aesonObject $ \o -> do
   value <- parseValue o
   datumHash <- getFieldOptional' o "datumHash"
   datum <- getFieldOptional' o "datum"
-  script <- parseScript o
+  script <- getFieldOptional' o "script" >>= case _ of
+    Nothing -> pure Nothing
+    Just script -> Just <$> parseScript script
   pure { address, value, datumHash, datum, script }
 
-parseScript :: Object Aeson -> Either JsonDecodeError (Maybe ScriptRef)
-parseScript outer =
-  getFieldOptional' outer "script" >>= case _ of
-    Nothing -> pure Nothing
-    Just script -> do
-      case (Array.head $ ForeignObject.toUnfoldable script) of
-        Just ("plutus:v1" /\ plutusScript) ->
-          Just <$> parsePlutusScriptWithLang PlutusV1 plutusScript
+parseScript :: Object Aeson -> Either JsonDecodeError ScriptRef
+parseScript script =
+  case Array.head $ ForeignObject.toUnfoldable script of
+    Just ("plutus:v1" /\ plutusScript) ->
+      parsePlutusScriptWithLang PlutusV1 plutusScript
 
-        Just ("plutus:v2" /\ plutusScript) ->
-          Just <$> parsePlutusScriptWithLang PlutusV2 plutusScript
+    Just ("plutus:v2" /\ plutusScript) ->
+      parsePlutusScriptWithLang PlutusV2 plutusScript
 
-        Just ("native" /\ nativeScript) ->
-          Just <<< NativeScriptRef <$> parseNativeScript nativeScript
+    Just ("native" /\ nativeScript) ->
+      NativeScriptRef <$> parseNativeScript nativeScript
 
-        _ ->
-          Left $ TypeMismatch $
-            "Expected native or Plutus script, got: " <> show script
+    _ ->
+      Left $ TypeMismatch $
+        "Expected native or Plutus script, got: " <> show script
   where
   parsePlutusScriptWithLang
     :: Language -> Aeson -> Either JsonDecodeError ScriptRef
