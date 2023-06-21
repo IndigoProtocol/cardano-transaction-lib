@@ -8,11 +8,9 @@ module Ctl.Internal.QueryM.Ogmios
   , CurrentEpoch(CurrentEpoch)
   , DelegationsAndRewardsR(DelegationsAndRewardsR)
   , ExecutionUnits
-  , MempoolReleased(..)
   , MempoolSizeAndCapacity(..)
   , MempoolSnapshotAcquired
   , MempoolTransaction(..)
-  , MempoolTxBody(..)
   , MempoolSizeAndCapacity(MempoolSizeAndCapacity)
   , MempoolSnapshotAcquired
   , MempoolTransaction(MempoolTransaction)
