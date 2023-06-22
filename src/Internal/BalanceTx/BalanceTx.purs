@@ -6,6 +6,7 @@ module Ctl.Internal.BalanceTx
 
 import Prelude
 
+import Contract.Address (getNetworkId)
 import Contract.Log (logTrace')
 import Control.Monad.Error.Class (catchError, liftMaybe, throwError)
 import Control.Monad.Except.Trans (ExceptT(ExceptT), except, runExceptT)
@@ -23,7 +24,12 @@ import Ctl.Internal.BalanceTx.Collateral
   ( addTxCollateral
   , addTxCollateralReturn
   )
-import Ctl.Internal.BalanceTx.Constraints (BalanceTxConstraintsBuilder)
+import Ctl.Internal.BalanceTx.Collateral.Select (selectCollateral)
+import Ctl.Internal.BalanceTx.Constraints
+  ( BalanceTxConstraintsBuilder
+  , _collateralUtxos
+  , _nonSpendableInputs
+  )
 import Ctl.Internal.BalanceTx.Constraints
   ( _changeAddress
   , _maxChangeOutputTokenQuantity
@@ -128,9 +134,12 @@ import Ctl.Internal.Contract.Wallet
   ) as Wallet
 import Ctl.Internal.Helpers (liftEither, (??))
 import Ctl.Internal.Partition (equipartition, partition)
-import Ctl.Internal.Plutus.Conversion (toPlutusValue)
+import Ctl.Internal.Plutus.Conversion (fromPlutusUtxoMap, toPlutusValue)
 import Ctl.Internal.Serialization.Address (Address)
 import Ctl.Internal.Types.OutputDatum (OutputDatum(NoOutputDatum, OutputDatum))
+import Ctl.Internal.Types.ProtocolParameters
+  ( ProtocolParameters(ProtocolParameters)
+  )
 import Ctl.Internal.Types.Scripts
   ( Language(PlutusV1)
   , PlutusScript(PlutusScript)
@@ -160,13 +169,14 @@ import Data.Lens.Setter ((%~), (.~), (?~))
 import Data.Log.Tag (TagSet)
 import Data.Log.Tag (fromArray, tag) as TagSet
 import Data.Map (Map)
-import Data.Map (empty, insert, lookup, toUnfoldable, union) as Map
+import Data.Map (empty, filterKeys, insert, lookup, toUnfoldable, union) as Map
 import Data.Maybe (Maybe(Just, Nothing), fromMaybe, isJust, maybe)
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.Set as Set
 import Data.Traversable (for, traverse)
 import Data.Tuple (fst)
 import Data.Tuple.Nested (type (/\), (/\))
+import Data.UInt (toInt) as UInt
 import Effect.Aff.Class (liftAff)
 import Effect.Class (liftEffect)
 
@@ -267,9 +277,29 @@ balanceTxWithConstraints transaction extraUtxos constraintsBuilder = do
 
 setTransactionCollateral :: Address -> Transaction -> BalanceTxM Transaction
 setTransactionCollateral changeAddr transaction = do
-  collateral <-
-    liftEitherContract $ note CouldNotGetCollateral <$>
-      Wallet.getWalletCollateral
+  nonSpendableSet <- asksConstraints _nonSpendableInputs
+  mbCollateralUtxos <- asksConstraints _collateralUtxos
+  -- We must filter out UTxOs that are set as non-spendable in the balancer
+  -- constraints
+  let
+    isSpendable = not <<< flip Set.member nonSpendableSet
+  collateral <- case mbCollateralUtxos of
+    -- if no collateral utxos are specified, use the wallet
+    Nothing -> Array.filter (isSpendable <<< _.input <<< unwrap) <$> do
+      liftEitherContract $ note CouldNotGetCollateral <$>
+        Wallet.getWalletCollateral
+    -- otherwise, get all the utxos, filter out unspendable, and select
+    -- collateral using internal algo, that is also used in KeyWallet
+    Just utxoMap -> do
+      ProtocolParameters params <- liftContract getProtocolParameters
+      networkId <- liftContract getNetworkId
+      let
+        coinsPerUtxoUnit = params.coinsPerUtxoUnit
+        maxCollateralInputs = UInt.toInt $ params.maxCollateralInputs
+        utxoMap' = fromPlutusUtxoMap networkId $ Map.filterKeys isSpendable
+          utxoMap
+      liftEffect $ Array.fromFoldable <<< fold <$>
+        selectCollateral coinsPerUtxoUnit maxCollateralInputs utxoMap'
   addTxCollateralReturn collateral (addTxCollateral collateral transaction)
     changeAddr
 
