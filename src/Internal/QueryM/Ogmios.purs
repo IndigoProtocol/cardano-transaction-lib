@@ -540,8 +540,12 @@ instance DecodeAeson OgmiosEraSummaries where
       -- `Maybe`).
       end' <- getField o "end"
       end <- if isNull end' then pure Nothing else Just <$> decodeAeson end'
+      let end2 = 
+            case end of
+              Just x -> if (unwrap x).time > (unwrap start).time then Just x else Nothing
+              Nothing -> Nothing
       parameters <- decodeEraSummaryParameters =<< getField o "parameters"
-      pure $ wrap { start, end, parameters }
+      pure $ wrap { start, end: end2, parameters }
 
     decodeEraSummaryParameters
       :: Object Aeson -> Either JsonDecodeError EraSummaryParameters
