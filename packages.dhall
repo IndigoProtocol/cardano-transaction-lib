@@ -285,7 +285,7 @@ let additions =
       , cardano-plutus-data-schema =
         { dependencies = [ "prelude" ]
         , repo =
-            "https://github.com/mlabs-haskell/purescript-cardano-plutus-data-schema"
+            "https://github.com/IndigoProtocol/purescript-cardano-plutus-data-schema"
         , version = "v1.0.0"
         }
       , plutus-types =

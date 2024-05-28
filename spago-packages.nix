@@ -237,9 +237,9 @@ let
         name = "cardano-plutus-data-schema";
         version = "v1.0.0";
         src = pkgs.fetchgit {
-          url = "https://github.com/mlabs-haskell/purescript-cardano-plutus-data-schema";
-          rev = "eb0bb78927c50c4bee364e932c9fa8cf94546191";
-          sha256 = "118i6dlfqk7q0va3bd4vplsv9i6sh83cr51gshas6jjwc5qbriks";
+          url = "https://github.com/IndigoProtocol/purescript-cardano-plutus-data-schema";
+          rev = "e1b93b36f183c178ef49a576eaf38afb57c31f14";
+          sha256 = "0r33nrwjcrcx332jcnkn495h4x4ah6rk47vyn6d2z63kwi760741";
         };
         phases = "installPhase";
         installPhase = "ln -s $src $out";
