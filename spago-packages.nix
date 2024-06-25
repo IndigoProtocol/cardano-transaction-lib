@@ -235,7 +235,7 @@ let
 
     "cardano-plutus-data-schema" = pkgs.stdenv.mkDerivation {
         name = "cardano-plutus-data-schema";
-        version = "v1.0.0";
+        version = "e1b93b36f183c178ef49a576eaf38afb57c31f14";
         src = pkgs.fetchgit {
           url = "https://github.com/IndigoProtocol/purescript-cardano-plutus-data-schema";
           rev = "e1b93b36f183c178ef49a576eaf38afb57c31f14";

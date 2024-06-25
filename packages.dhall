@@ -286,7 +286,7 @@ let additions =
         { dependencies = [ "prelude" ]
         , repo =
             "https://github.com/IndigoProtocol/purescript-cardano-plutus-data-schema"
-        , version = "v1.0.0"
+        , version = "e1b93b36f183c178ef49a576eaf38afb57c31f14"
         }
       , plutus-types =
         { dependencies =
