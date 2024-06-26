@@ -235,11 +235,11 @@ let
 
     "cardano-plutus-data-schema" = pkgs.stdenv.mkDerivation {
         name = "cardano-plutus-data-schema";
-        version = "e1b93b36f183c178ef49a576eaf38afb57c31f14";
+        version = "db745aa1a82bc1e96fba8a9cb8bbdc1db7083eb7";
         src = pkgs.fetchgit {
           url = "https://github.com/IndigoProtocol/purescript-cardano-plutus-data-schema";
-          rev = "e1b93b36f183c178ef49a576eaf38afb57c31f14";
-          sha256 = "0r33nrwjcrcx332jcnkn495h4x4ah6rk47vyn6d2z63kwi760741";
+          rev = "db745aa1a82bc1e96fba8a9cb8bbdc1db7083eb7";
+          sha256 = "1v6bd925mgyhyljzx22ph1k0ajq69arlpyjrqdjg6jf665bwc7dh";
         };
         phases = "installPhase";
         installPhase = "ln -s $src $out";
@@ -259,11 +259,11 @@ let
 
     "cardano-types" = pkgs.stdenv.mkDerivation {
         name = "cardano-types";
-        version = "v1.0.1";
+        version = "acb11484ea056fda7071a5bc7f2ced95a91e30ff";
         src = pkgs.fetchgit {
-          url = "https://github.com/mlabs-haskell/purescript-cardano-types";
-          rev = "715d4b2dcf8b29cb45001209ee562f758a513261";
-          sha256 = "1xcrdmpwd3qcdiyjfrj0z2dh56l4z1s97r25b6nhlqwmwz7qz19z";
+          url = "https://github.com/IndigoProtocol/purescript-cardano-types";
+          rev = "acb11484ea056fda7071a5bc7f2ced95a91e30ff";
+          sha256 = "1vgiywirzpvxlc23vhi2r0dcvavwl6i26vgcji5ii8n06ybq18iz";
         };
         phases = "installPhase";
         installPhase = "ln -s $src $out";
