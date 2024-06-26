@@ -259,11 +259,11 @@ let
 
     "cardano-types" = pkgs.stdenv.mkDerivation {
         name = "cardano-types";
-        version = "acb11484ea056fda7071a5bc7f2ced95a91e30ff";
+        version = "6ea5692cfee7a25b1c0a4ac45bc523f5c8aafdfa";
         src = pkgs.fetchgit {
           url = "https://github.com/IndigoProtocol/purescript-cardano-types";
-          rev = "acb11484ea056fda7071a5bc7f2ced95a91e30ff";
-          sha256 = "1vgiywirzpvxlc23vhi2r0dcvavwl6i26vgcji5ii8n06ybq18iz";
+          rev = "6ea5692cfee7a25b1c0a4ac45bc523f5c8aafdfa";
+          sha256 = "0p2a2z8fci5ci9wp97xr3fyraxmfm2vdzg59kzxq31fmsw3icrij";
         };
         phases = "installPhase";
         installPhase = "ln -s $src $out";

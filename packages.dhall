@@ -362,7 +362,7 @@ let additions =
           , "unsafe-coerce"
           ]
         , repo = "https://github.com/IndigoProtocol/purescript-cardano-types"
-        , version = "acb11484ea056fda7071a5bc7f2ced95a91e30ff"
+        , version = "6ea5692cfee7a25b1c0a4ac45bc523f5c8aafdfa"
         }
       , cardano-message-signing =
         { dependencies =
